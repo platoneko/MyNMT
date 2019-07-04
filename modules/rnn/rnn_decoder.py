@@ -13,6 +13,7 @@ class GRUDecoder(nn.Module):
                  hidden_size,
                  num_classes,
                  start_index,
+                 end_index,
                  embedding,
                  attention=None,
                  num_steps=50,
@@ -23,6 +24,7 @@ class GRUDecoder(nn.Module):
         self.hidden_size = hidden_size
         self.num_classes = num_classes
         self.start_index = start_index
+        self.end_index = end_index
         self.embedding = embedding
         self.attention = attention
         self.num_steps = num_steps
@@ -110,7 +112,6 @@ class GRUDecoder(nn.Module):
 
     def forward_beam_search(self,
                             hidden,
-                            end_index,
                             attn_value=None,
                             attn_mask=None,
                             beam_size=4,
@@ -146,7 +147,7 @@ class GRUDecoder(nn.Module):
             _, predictions = self.forward(hidden, attn_value=attn_value, attn_mask=attn_mask)
             return predictions
 
-        beam_search = BeamSearch(end_index, self.num_steps, beam_size, per_node_beam_size)
+        beam_search = BeamSearch(self.end_index, self.num_steps, beam_size, per_node_beam_size)
         start_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index)
 
         state = {'hidden': hidden}
