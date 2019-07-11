@@ -8,12 +8,15 @@ from nltk.translate.bleu_score import SmoothingFunction
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def accuracy(logits, targets, padding_idx=None):
+def accuracy(inputs, targets, padding_idx=None):
     """
-    logits: (batch_size, max_len, vocab_size)
+    logits: (batch_size, max_len, num_classes)
     targets: (batch_size, max_len)
     """
-    _, preds = logits.max(dim=2)
+    if isinstance(inputs, torch.FloatTensor):
+        preds = inputs.argmax(dim=2)
+    else:
+        preds = inputs
     trues = (preds == targets).float()
     if padding_idx is not None:
         weights = targets.ne(padding_idx).float()
@@ -24,33 +27,27 @@ def accuracy(logits, targets, padding_idx=None):
     return acc
 
 
-def attn_accuracy(logits, targets):
-    """
-    logits: (batch_size, vocab_size)
-    targets: (batch_size)
-    """
-    _, preds = logits.squeeze(1).max(dim=-1)
-    trues = (preds == targets).float()
-    acc = trues.mean()
-    return acc
-
-
 def perplexity(logits, targets, weight=None, padding_idx=None):
     """
-    logits: (batch_size, max_len, vocab_size)
-    targets: (batch_size, max_len)
+    :param
+    logits : (batch_size, max_len, num_classes)
+    targets : (batch_size, max_len)
+    :return
+    ppl : (batch_size,)
     """
     batch_size = logits.size(0)
     if weight is None and padding_idx is not None:
         weight = torch.ones(logits.size(-1))
         weight[padding_idx] = 0
-    nll = F.nll_loss(input=logits.view(-1, logits.size(-1)),
-                     target=targets.contiguous().view(-1),
-                     weight=weight,
-                     reduction='none')
+    nll = F.cross_entropy(
+        input=logits.reshape(-1, logits.size(-1)),
+        target=targets.reshape(-1),
+        weight=weight,
+        reduction='none'
+    )
     nll = nll.view(batch_size, -1).sum(dim=1)
     if padding_idx is not None:
-        word_cnt = targets.ne(padding_idx).float().sum()
+        word_cnt = targets.ne(padding_idx).float().sum(dim=1)
         nll = nll / word_cnt
     ppl = nll.exp()
     return ppl
@@ -88,7 +85,6 @@ def distinct(seqs):
     """
     distinct
     """
-    batch_size = len(seqs)
     intra_dist1, intra_dist2 = [], []
     unigrams_all, bigrams_all = Counter(), Counter()
     for seq in seqs:

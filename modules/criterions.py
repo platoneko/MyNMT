@@ -13,17 +13,17 @@ class SequenceNLLLoss(_Loss):
         self.padding_idx = padding_idx
         self.reduction = reduction
 
-    def forward(self, input, target, reduction=True):
+    def forward(self, inputs, targets, reduction=True):
         """
-        input: (batch_size, max_len, vocab_size)
-        target: (batch_size, max_len)
+        inputs: (batch_size, max_len, vocab_size)
+        targets: (batch_size, max_len)
         """
         if self.weight is None and self.padding_idx is not None:
-            self.weight = input.new_ones(input.size(-1))
-        batch_size = input.size(0)
+            self.weight = inputs.new_ones(inputs.size(-1))
+        batch_size = inputs.size(0)
         nll = F.nll_loss(
-            input=input.reshape(-1, input.size(-1)),
-            target=target.reshape(-1),
+            input=inputs.reshape(-1, inputs.size(-1)),
+            target=targets.reshape(-1),
             weight=self.weight,
             reduction='none'
         )
@@ -31,7 +31,10 @@ class SequenceNLLLoss(_Loss):
 
         if reduction:
             if self.reduction == 'mean':
-                nll = nll.mean()
+                if self.padding_idx is not None:
+                    word_cnt = targets.ne(self.padding_idx).float().sum(dim=1)
+                    nll = nll / word_cnt
+                    nll = nll.mean()
             elif self.reduction == 'sum':
                 nll = nll.sum()
 
@@ -49,17 +52,17 @@ class SequenceCrossEntropy(_Loss):
         self.padding_idx = padding_idx
         self.reduction = reduction
 
-    def forward(self, input, target, reduction=True):
+    def forward(self, inputs, targets, reduction=True):
         """
-        input: (batch_size, max_len, vocab_size)
-        target: (batch_size, max_len)
+        inputs: (batch_size, max_len, vocab_size)
+        targets: (batch_size, max_len)
         """
         if self.weight is None and self.padding_idx is not None:
-            self.weight = input.new_ones(input.size(-1))
-        batch_size = input.size(0)
+            self.weight = inputs.new_ones(inputs.size(-1))
+        batch_size = inputs.size(0)
         cross_entropy = F.cross_entropy(
-            input=input.reshape(-1, input.size(-1)),
-            target=target.reshape(-1),
+            input=inputs.reshape(-1, inputs.size(-1)),
+            target=targets.reshape(-1),
             weight=self.weight,
             reduction='none'
         )
@@ -67,7 +70,10 @@ class SequenceCrossEntropy(_Loss):
 
         if reduction:
             if self.reduction == 'mean':
-                cross_entropy = cross_entropy.mean()
+                if self.padding_idx is not None:
+                    word_cnt = targets.ne(self.padding_idx).float().sum(dim=1)
+                    cross_entropy = cross_entropy / word_cnt
+                    cross_entropy = cross_entropy.mean()
             elif self.reduction == 'sum':
                 cross_entropy = cross_entropy.sum()
 
