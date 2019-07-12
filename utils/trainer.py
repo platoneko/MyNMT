@@ -93,8 +93,6 @@ class Trainer(object):
                 inputs,
                 optimizer=self.optimizer,
                 grad_clip=self.grad_clip,
-                is_training=True,
-                epoch=self.epoch
             )
             elapsed = time.time() - start_time
 
@@ -207,7 +205,7 @@ class Trainer(object):
         mm = MetricsManager()
         with torch.no_grad():
             for inputs in self.valid_iter:
-                metrics = self.model.iterate(inputs=inputs, is_training=False)
+                metrics = self.model.iterate(inputs=inputs)
                 mm.update(metrics)
         return mm
 
