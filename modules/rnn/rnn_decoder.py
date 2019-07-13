@@ -71,7 +71,7 @@ class GRUDecoder(nn.Module):
         if target is not None:
             num_steps = target.size(1) - 1
 
-        last_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index)
+        last_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index).long()
         step_logits = []
         for timestep in range(num_steps):
             if early_stop and (last_predictions == self.end_index).all():
@@ -142,7 +142,7 @@ class GRUDecoder(nn.Module):
             assert attn_value is not None
 
         beam_search = BeamSearch(self.end_index, num_steps, beam_size, per_node_beam_size)
-        start_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index)
+        start_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index).long()
 
         state = {'hidden': hidden}
         if self.attention:
@@ -154,7 +154,6 @@ class GRUDecoder(nn.Module):
 
     def _beam_step(self, inputs, state):
         # shape: (group_size, input_size)
-        print(inputs.device, self.embedding.device)
         embedded_inputs = self.embedding(inputs)
         rnn_inputs = embedded_inputs
         hidden = state['hidden']
@@ -238,7 +237,7 @@ class LSTMDecoder(nn.Module):
         if target is not None:
             num_steps = target.size(1) - 1
 
-        last_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index)
+        last_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index).long()
         cell_state = hidden.new_full((hidden.size(0), self.hidden_size), fill_value=0.0)
         hidden_tuple = (hidden, cell_state)
 
@@ -261,14 +260,11 @@ class LSTMDecoder(nn.Module):
 
     def _take_step(self, inputs, hidden_tuple, attn_value=None, attn_mask=None):
         # shape: (batch_size, input_size)
-        print(inputs.device)
-        print(self.embedding.device)
         embedded_inputs = self.embedding(inputs)
         rnn_inputs = embedded_inputs
         if self.attention is not None:
             # shape: (batch_size, num_rows)
             attn_score = self.attention(hidden_tuple[0], attn_value, attn_mask)
-            print(attn_score.size(), attn_value.size())
             attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
             # shape: (batch_size, input_size + attn_size)
             rnn_inputs = torch.cat([embedded_inputs, attn_inputs], dim=-1)
@@ -315,7 +311,7 @@ class LSTMDecoder(nn.Module):
             assert attn_value is not None
 
         beam_search = BeamSearch(end_index, num_steps, beam_size, per_node_beam_size)
-        start_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index)
+        start_predictions = hidden.new_full((hidden.size(0),), fill_value=self.start_index).long()
         cell_state = hidden.new_full((hidden.size(0), self.hidden_size), fill_value=0.0)
 
         state = {'hidden': hidden, 'cell_state': cell_state}

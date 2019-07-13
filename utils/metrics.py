@@ -18,16 +18,15 @@ def accuracy(preds, targets, padding_idx=None):
     if preds_len > targets_len:
         preds = preds[:, :targets_len]
     elif preds_len < targets_len:
-        tensor = targets.new_full((batch_size, targets_len), fill_value=padding_idx)
+        tensor = targets.new_full((batch_size, targets_len), fill_value=-1)
         tensor[:, :preds_len] = preds
         preds = tensor
     trues = (preds == targets).float()
     if padding_idx is not None:
         weights = targets.ne(padding_idx).float()
-        acc = (weights * trues).sum(dim=1) / weights.sum(dim=1)
+        acc = (weights * trues).sum() / weights.sum()
     else:
-        acc = trues.mean(dim=1)
-    acc = acc.mean()
+        acc = trues.mean()
     return acc
 
 

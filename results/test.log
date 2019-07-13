@@ -1,0 +1,189 @@
+Seq2Seq(
+  (embedding): Embedding(437, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(437, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=437, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 8012337
+
+Generate finished!
+
+NLL-3.254   PPL-26.179   ACC-0.168   BLEU_1-0.208   BLEU_2-0.190   INTRA_DIST1-0.995   INTRA_DIST2-0.995   INTER_DIST1-0.032   INTER_DIST2-0.032
+Testing done!
+Seq2Seq(
+  (embedding): Embedding(437, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(437, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=437, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 8012337
+
+Generate finished!
+
+NLL-3.254   PPL-26.653   ACC-0.311   BLEU_1-0.489   BLEU_2-0.381   INTRA_DIST1-0.241   INTRA_DIST2-0.262   INTER_DIST1-0.001   INTER_DIST2-0.001
+Testing done!
+Seq2Seq(
+  (embedding): Embedding(437, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(437, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=437, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 8012337
+
+Generate finished!
+
+NLL-3.254   PPL-26.457   ACC-0.313   BLEU_1-0.489   BLEU_2-0.381   INTRA_DIST1-0.241   INTRA_DIST2-0.262   INTER_DIST1-0.001   INTER_DIST2-0.001
+Testing done!
+Seq2Seq(
+  (embedding): Embedding(4807, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(4807, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=4807, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 12823707
+
+Generate finished!
+
+NLL-5.785   PPL-327.474   ACC-0.000   BLEU_1-0.000   BLEU_2-0.000   INTRA_DIST1-0.000   INTRA_DIST2-0.000   INTER_DIST1-0.000   INTER_DIST2-0.000
+Testing done!
+Seq2Seq(
+  (embedding): Embedding(4807, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(4807, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=4807, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 12823707
+
+Generate finished!
+
+NLL-1.193   PPL-3.388   ACC-0.543   BLEU_1-1.059   BLEU_2-0.942   INTRA_DIST1-0.678   INTRA_DIST2-0.864   INTER_DIST1-0.292   INTER_DIST2-0.469
+Testing done!
+Seq2Seq(
+  (embedding): Embedding(4807, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(4807, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=4807, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 12823707
+
+Generate finished!
+
+NLL-1.193   PPL-3.421   ACC-0.551   BLEU_1-1.059   BLEU_2-0.942   INTRA_DIST1-0.678   INTRA_DIST2-0.864   INTER_DIST1-0.301   INTER_DIST2-0.487
+Testing done!
+Seq2Seq(
+  (embedding): Embedding(4807, 300)
+  (encoder): GRUEncoder(
+    (rnn): GRU(300, 400, batch_first=True, bidirectional=True)
+  )
+  (decoder): GRUDecoder(
+    (embedding): Embedding(4807, 300)
+    (attention): MLPAttention(
+      (linear_query): Linear(in_features=800, out_features=800, bias=True)
+      (linear_value): Linear(in_features=800, out_features=800, bias=False)
+      (tanh): Tanh()
+      (linear_hidden): Linear(in_features=800, out_features=1, bias=False)
+    )
+    (rnn): GRUCell(1100, 800)
+    (output_layer): Sequential(
+      (0): Dropout(p=0.2)
+      (1): Linear(in_features=800, out_features=4807, bias=True)
+    )
+  )
+  (cross_entropy): SequenceCrossEntropy()
+)
+Number of parameters: 12823707
+
+Generate finished!
+
+NLL-1.193   PPL-3.365   ACC-0.500   BLEU_1-0.963   BLEU_2-0.862   INTRA_DIST1-0.718   INTRA_DIST2-0.902   INTER_DIST1-0.357   INTER_DIST2-0.575
+Testing done!

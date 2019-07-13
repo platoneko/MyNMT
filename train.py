@@ -31,19 +31,18 @@ def get_config():
     data_arg = parser.add_argument_group("Data")
     data_arg.add_argument("--train_path", type=str, required=True)
     data_arg.add_argument("--valid_path", type=str, required=True)
-    data_arg.add_argument("--save_dir", type=str, default="./outputs/")
     data_arg.add_argument("--vector_dir", type=str, default="./dataset/vector")
     data_arg.add_argument("--vocab_dir", type=str, default="./dataset/vocab")
     data_arg.add_argument("--max_vocab_size", type=int, default=50000)
     data_arg.add_argument("--min_freq", type=int, default=5)
 
     # Model
-    net_arg = parser.add_argument_group("Model")
-    net_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
-    net_arg.add_argument("--hidden_size", type=int, default=800)
-    net_arg.add_argument("--num_layers", type=int, default=2)
-    net_arg.add_argument("--dropout", type=float, default=0.2)
-    net_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
+    model_arg = parser.add_argument_group("Model")
+    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
+    model_arg.add_argument("--hidden_size", type=int, default=800)
+    model_arg.add_argument("--num_layers", type=int, default=2)
+    model_arg.add_argument("--dropout", type=float, default=0.2)
+    model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
 
     # Training
     train_arg = parser.add_argument_group("Training")
@@ -56,11 +55,11 @@ def get_config():
     # MISC
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument("--gpu", type=int, default=-1)
-    misc_arg.add_argument("--log_steps", type=int, default=1)
-    misc_arg.add_argument("--valid_steps", type=int, default=1)
+    misc_arg.add_argument("--log_steps", type=int, default=5)
+    misc_arg.add_argument("--valid_steps", type=int, default=10)
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str)
-    misc_arg.add_argument("--check", action="store_true")
+    data_arg.add_argument("--save_dir", type=str, default="./outputs/")
 
     config = parser.parse_args()
 
@@ -72,8 +71,7 @@ def main():
     main
     """
     config = get_config()
-    if config.check:
-        config.save_dir = "./tmp/"
+
     if torch.cuda.is_available() and config.gpu >= 0:
         device = torch.device(config.gpu)
     else:
@@ -140,6 +138,7 @@ def main():
                                max_size=config.max_vocab_size,
                                min_freq=config.min_freq)
         tag_field.vocab = text_field.vocab
+        print(f"vocab size: {len(text_field.vocab)}")
 
         gender_field.build_vocab(train_data)
         loc_field.build_vocab(train_data)

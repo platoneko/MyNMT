@@ -6,11 +6,10 @@ class SequenceNLLLoss(_Loss):
     """
     NLLLoss for sequence, average/sum the loss across the batches
     """
-    def __init__(self, weight=None, padding_idx=None, reduction='mean'):
+    def __init__(self, weight=None, reduction='mean'):
         super().__init__()
         assert reduction in ['none', 'sum', 'mean']
         self.register_buffer('weight', weight)
-        self.padding_idx = padding_idx
         self.reduction = reduction
 
     def forward(self, inputs, targets, reduction=True):
@@ -18,8 +17,6 @@ class SequenceNLLLoss(_Loss):
         inputs: (batch_size, max_len, vocab_size)
         targets: (batch_size, max_len)
         """
-        if self.weight is None and self.padding_idx is not None:
-            self.weight = inputs.new_ones(inputs.size(-1))
         batch_size = inputs.size(0)
         nll = F.nll_loss(
             input=inputs.reshape(-1, inputs.size(-1)),
@@ -57,8 +54,6 @@ class SequenceCrossEntropy(_Loss):
         inputs: (batch_size, max_len, vocab_size)
         targets: (batch_size, max_len)
         """
-        if self.weight is None and self.padding_idx is not None:
-            self.weight = inputs.new_ones(inputs.size(-1))
         batch_size = inputs.size(0)
         cross_entropy = F.cross_entropy(
             input=inputs.reshape(-1, inputs.size(-1)),

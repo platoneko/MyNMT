@@ -49,6 +49,7 @@ class Trainer(object):
         self.best_valid_metric = float(
             "inf") if self.is_decreased_valid_metric else -float("inf")
         self.epoch = 0
+        self.best_epoch = 0
         self.batch_num = 0
 
         self.train_start_message = "\n".join(["",
@@ -110,7 +111,7 @@ class Trainer(object):
 
             if batch_id % self.valid_steps == 0:
                 self.logger.info(self.valid_start_message)
-                valid_mm, _ = self.evaluate()
+                valid_mm = self.evaluate()
 
                 message_prefix = "[Valid][{:2d}][{}/{}]".format(self.epoch, batch_id, num_batches)
                 metrics_message = valid_mm.report_cum()
@@ -140,9 +141,8 @@ class Trainer(object):
         """
         for _ in range(self.epoch, self.num_epochs):
             self.train_epoch()
-        valid_mm = self.evaluate()
         self.logger.info('Train finished!\n')
-        self.logger.info(valid_mm.report_cum())
+        self.logger.info(f'Best model state at epoch {self.best_epoch}.\n')
 
     def save(self, is_best=False):
         """
@@ -165,6 +165,7 @@ class Trainer(object):
         self.logger.info("Saved train state to '{}'".format(train_file))
 
         if is_best:
+            self.best_epoch = self.epoch
             best_model_file = os.path.join(self.save_dir, "best.model")
             best_train_file = os.path.join(self.save_dir, "best.train")
             shutil.copy(model_file, best_model_file)
@@ -180,13 +181,11 @@ class Trainer(object):
         model_file = "{}.model".format(file_prefix)
         train_file = "{}.train".format(file_prefix)
 
-        model_state_dict = torch.load(
-            model_file, map_location=lambda storage, loc: storage)
+        model_state_dict = torch.load(model_file)
         self.model.load_state_dict(model_state_dict)
         self.logger.info("Loaded model state from '{}'".format(model_file))
 
-        train_state_dict = torch.load(
-            train_file, map_location=lambda storage, loc: storage)
+        train_state_dict = torch.load(train_file)
         self.epoch = train_state_dict["epoch"]
         self.best_valid_metric = train_state_dict["best_valid_metric"]
         self.batch_num = train_state_dict["batch_num"]

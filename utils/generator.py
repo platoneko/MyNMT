@@ -59,7 +59,8 @@ class Generator(object):
             test_outputs = \
                 self.model.beam_search(inputs, self.beam_size, self.per_node_beam_size)
             outputs.add(predictions=test_outputs.predictions)
-        target = inputs.response[:, 1:]
+        response_token, response_len = inputs.response
+        target = response_token[:, 1:]
         metrics = self.collect_metrics(outputs, target)
         return metrics
 
@@ -107,6 +108,7 @@ class Generator(object):
 
     def save_result(self, sentences):
         if self._new_file:
+            self._new_file = False
             with open(self.result_path, 'w') as result_file:
                 result_file.writelines([s + '\n' for s in sentences])
         else:

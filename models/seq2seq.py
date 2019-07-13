@@ -46,8 +46,9 @@ class Seq2Seq(BaseModel):
             attention=decoder_attn,
             dropout=dropout
         )
-
-        self.cross_entropy = SequenceCrossEntropy(padding_idx=padding_index)
+        weight = torch.ones(num_classes)
+        weight[padding_index] = 0.0
+        self.cross_entropy = SequenceCrossEntropy(padding_idx=padding_index, weight=weight)
 
     def forward(self, inputs, evaluation=False):
         """
