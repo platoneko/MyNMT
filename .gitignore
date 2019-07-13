@@ -3,3 +3,5 @@ dataset/*
 vocab.txt
 .idea/*
 *.pyc
+outputs/*
+*.pt
