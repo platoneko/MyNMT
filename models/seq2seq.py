@@ -1,5 +1,5 @@
 from modules.rnn import GRUEncoder
-from modules.rnn import GRUDecoder
+from modules.rnn import StackGRUDecoder
 from modules.attention import MLPAttention
 from modules.utils import *
 from models.base_model import BaseModel
@@ -18,6 +18,7 @@ class Seq2Seq(BaseModel):
             start_index,
             end_index,
             padding_index,
+            num_layers=2,
             dropout=0.2,
             teaching_force_rate=0.5,
     ):
@@ -30,19 +31,21 @@ class Seq2Seq(BaseModel):
         self.padding_index = padding_index
         self.dropout = dropout
         self.teaching_force_rate = teaching_force_rate
+        self.num_layers = num_layers
 
-        self.encoder = GRUEncoder(embedding_size, hidden_size // 2, dropout=dropout)
+        self.encoder = GRUEncoder(embedding_size, hidden_size // 2, dropout=dropout, num_layers=num_layers)
 
         decoder_attn = MLPAttention(hidden_size, hidden_size, hidden_size)
         decoder_input_size = embedding_size + hidden_size
         num_classes = embedding.weight.size(0)
-        self.decoder = GRUDecoder(
+        self.decoder = StackGRUDecoder(
             decoder_input_size,
             hidden_size,
             num_classes,
             start_index,
             end_index,
             embedding,
+            num_layers=num_layers,
             attention=decoder_attn,
             dropout=dropout
         )
@@ -65,7 +68,7 @@ class Seq2Seq(BaseModel):
         encoder_outputs_mask = post_token.ne(self.padding_index)
         if self.training:
             logits = self.decoder(
-                encoder_hidden[0],
+                encoder_hidden,
                 target=response_token,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
@@ -74,7 +77,7 @@ class Seq2Seq(BaseModel):
         elif evaluation:
             # eval, we need to obtain targets max len, so `target` is required
             logits = self.decoder(
-                encoder_hidden[0],
+                encoder_hidden,
                 target=response_token,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask
@@ -82,7 +85,7 @@ class Seq2Seq(BaseModel):
         else:
             # test
             logits = self.decoder(
-                encoder_hidden[0],
+                encoder_hidden,
                 target=None,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
@@ -98,7 +101,7 @@ class Seq2Seq(BaseModel):
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
         encoder_outputs_mask = post_token.ne(self.padding_index)
         all_top_k_predictions, log_probabilities = \
-            self.decoder.forward_beam_search(encoder_hidden[0],
+            self.decoder.forward_beam_search(encoder_hidden,
                                              attn_value=encoder_outputs,
                                              attn_mask=encoder_outputs_mask,
                                              beam_size=beam_size,

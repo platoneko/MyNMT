@@ -137,7 +137,8 @@ def main():
         end_index=text_field.vocab.stoi[EOS_TOKEN],
         padding_index=text_field.vocab.stoi[PAD_TOKEN],
         dropout=config.dropout,
-        teaching_force_rate=config.teaching_force_rate
+        teaching_force_rate=config.teaching_force_rate,
+        num_layers=config.num_layers
     )
     model.load(filename=config.ckpt)
     model.to(device)
@@ -156,8 +157,6 @@ def main():
         config.per_node_beam_size = config.beam_size
     generator = Generator(
         model=model,
-        end_index=model.end_index,
-        padding_index=model.padding_index,
         data_iter=test_iter,
         vocab=text_field.vocab,
         logger=logger,

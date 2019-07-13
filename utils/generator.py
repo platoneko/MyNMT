@@ -8,8 +8,6 @@ class Generator(object):
     def __init__(
             self,
             model,
-            end_index,
-            padding_index,
             data_iter,
             vocab,
             logger,
@@ -18,8 +16,6 @@ class Generator(object):
             result_path=None
     ):
         self.model = model
-        self.end_index = end_index
-        self.padding_index = padding_index
         assert beam_size > 0
         self.beam_size = beam_size
         self.per_node_beam_size = per_node_beam_size
@@ -77,7 +73,7 @@ class Generator(object):
         metrics.add(nll=nll, ppl=ppl)
 
         predictions = outputs.predictions
-        acc = accuracy(predictions, target, padding_idx=self.padding_index)
+        acc = accuracy(predictions, target, padding_idx=self.model.padding_index)
         predict_sentences = self.tensor2str(predictions)
         target_sentences = self.tensor2str(target)
         bleu_1, bleu_2 = bleu(predict_sentences, target_sentences)
@@ -100,7 +96,7 @@ class Generator(object):
             array = tensor[idx].tolist()
             token_list = []
             for token_id in array:
-                if token_id == self.end_index:
+                if token_id == self.model.end_index:
                     break
                 token_list.append(self.vocab.itos[token_id])
             sentences.append(' '.join(token_list))

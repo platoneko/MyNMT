@@ -183,7 +183,8 @@ def main():
         end_index=text_field.vocab.stoi[EOS_TOKEN],
         padding_index=text_field.vocab.stoi[PAD_TOKEN],
         dropout=config.dropout,
-        teaching_force_rate=config.teaching_force_rate
+        teaching_force_rate=config.teaching_force_rate,
+        num_layers=config.num_layers
     )
     model.to(device)
 
