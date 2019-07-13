@@ -12,6 +12,7 @@ class Generator(object):
             padding_index,
             data_iter,
             vocab,
+            logger,
             beam_size=4,
             per_node_beam_size=4,
             result_path=None
@@ -26,6 +27,7 @@ class Generator(object):
         self.vocab = vocab
         self.result_path = result_path
         self._new_file = True
+        self.logger = logger
 
     def generate(self):
         """
@@ -37,30 +39,42 @@ class Generator(object):
             for inputs in self.data_iter:
                 metrics = self.iterate(inputs=inputs)
                 mm.update(metrics)
-        return mm
+        self.logger.info('Generate finished!\n')
+        self.logger.info(mm.report_cum())
 
     def iterate(self, inputs):
         """
         iterate
         """
+        outputs = Pack()
+        # We need greedy search to obtain PPL
+        eval_outputs = self.model.forward(inputs, evaluation=True)
+        logits = eval_outputs.logits
+        outputs.add(logits=logits)
         if self.beam_size == 1:
-            outputs = self.model.forward(inputs)
-            logits = outputs.logits
-            predictions = logits.argmax(dim=2)
+            test_outputs = self.model.forward(inputs, evaluation=False)
+            predictions = test_outputs.logits.argmax(dim=2)
             outputs.add(predictions=predictions)
         else:
-            outputs = \
+            test_outputs = \
                 self.model.beam_search(inputs, self.beam_size, self.per_node_beam_size)
+            outputs.add(predictions=test_outputs.predictions)
         target = inputs.response[:, 1:]
         metrics = self.collect_metrics(outputs, target)
         return metrics
 
     def collect_metrics(self, outputs, target):
         """
-        collect_metrics
+        Collect metrics and save generated results
         """
         num_samples = target.size(0)
         metrics = Pack(num_samples=num_samples)
+
+        logits = outputs.logits
+        nll = self.model.cross_entropy(logits, target)
+        ppl = nll.exp()
+        metrics.add(nll=nll, ppl=ppl)
+
         predictions = outputs.predictions
         acc = accuracy(predictions, target, padding_idx=self.padding_index)
         predict_sentences = self.tensor2str(predictions)

@@ -20,7 +20,7 @@ def gen_response(self, contexts):
     contexts -- a list of context, each context contains dialogue histories and personal profiles of every speaker
     Returns a list, where each element is the response of the corresponding context
 """
-from main import Model
+from legacy.main import Model
 import json
 import sys
 import codecs

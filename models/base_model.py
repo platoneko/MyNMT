@@ -35,8 +35,7 @@ class BaseModel(nn.Module):
         """
         if os.path.isfile(filename):
             # Load all tensors onto the CPU
-            state_dict = torch.load(
-                filename, map_location=lambda storage, loc: storage)
+            state_dict = torch.load(filename)
             self.load_state_dict(state_dict, strict=False)
             print("Loaded model state from '{}'".format(filename))
         else:

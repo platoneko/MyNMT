@@ -21,7 +21,7 @@ import sys
 import fractions
 from collections import Counter
 from itertools import chain
-from main import Model
+from legacy.main import Model
 import json
 import codecs
 

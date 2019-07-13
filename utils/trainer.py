@@ -208,32 +208,3 @@ class Trainer(object):
                 metrics = self.model.iterate(inputs=inputs)
                 mm.update(metrics)
         return mm
-
-
-def write_results(results, results_file):
-    """
-    write_results
-    """
-    with open(results_file, "w", encoding="utf-8") as f:
-        for result in results:
-            """
-            f.write("Source : {}\n".format(result.src))
-            f.write("Target : {}\n".format(result.tgt))
-            if "cue" in result.keys():
-                f.write("Cue : {}\n".format(result.cue))
-            if "prior_attn" in result.keys():
-                f.write("Prior Attn: {}\n".format(' '.join([str(value) for value in result.prior_attn.data.tolist()])))
-            if "posterior_attn" in result.keys():
-                f.write("Posterior Attn: {}\n".format(' '.join([str(value) for value in result.posterior_attn.data.tolist()])))
-            if "gumbel_attn" in result.keys():
-                f.write("Gumbel Attn: {}\n".format(' '.join([str(value) for value in result.gumbel_attn.data.tolist()])))
-            if "indexs" in result.keys():
-                f.write("Indexs : {}\n".format(result.indexs))
-            if "weights" in result.keys():
-                f.write("Weights : {}\n".format(result.weights))
-            """
-            for pred, score in zip(result.preds, result.scores):
-                #f.write("Predict: {} ({:.3f})\n".format(pred, score))
-                #f.write("{}\t{:.3f}\n".format(pred, score))
-                f.write("{}\n".format(pred))
-            #f.write("\n")

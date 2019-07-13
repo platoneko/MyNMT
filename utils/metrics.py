@@ -8,15 +8,19 @@ from nltk.translate.bleu_score import SmoothingFunction
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def accuracy(inputs, targets, padding_idx=None):
+def accuracy(preds, targets, padding_idx=None):
     """
-    logits: (batch_size, max_len, num_classes)
-    targets: (batch_size, max_len)
+    preds: (batch_size, preds_len)
+    targets: (batch_size, targets_len)
     """
-    if isinstance(inputs, torch.FloatTensor):
-        preds = inputs.argmax(dim=2)
-    else:
-        preds = inputs
+    batch_size, targets_len = targets.size()
+    preds_len = preds.size(1)
+    if preds_len > targets_len:
+        preds = preds[:, :targets_len]
+    elif preds_len < targets_len:
+        tensor = targets.new_full((batch_size, targets_len), fill_value=padding_idx)
+        tensor[:, :preds_len] = preds
+        preds = tensor
     trues = (preds == targets).float()
     if padding_idx is not None:
         weights = targets.ne(padding_idx).float()

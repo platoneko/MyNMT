@@ -27,7 +27,7 @@ def next_word_probability(self, context, partial_out):
     Returns a dict, where each key is a word and each value is a probability
     score for that word. Unset keys assume a probability of zero.
 """
-from main import Model
+from legacy.main import Model
 import math
 import json
 import sys
