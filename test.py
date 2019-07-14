@@ -9,6 +9,7 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
+from models.att_pab import AttPAB
 from utils.generator import Generator
 
 import pickle
@@ -103,7 +104,7 @@ def main():
         'response': ('response', text_field),
         'gender': ('gender', gender_field),
         'loc': ('loc', loc_field),
-        'tag': ('tag', tags_field)
+        'tag': ('tags', tags_field)
     }
 
     test_data = TabularDataset(
@@ -128,9 +129,14 @@ def main():
     )
 
     # Model definition
-    embedding = nn.Embedding(len(text_field.vocab), config.embedding_size)
-    model = Seq2Seq(
-        embedding=embedding,
+    text_embedding = nn.Embedding(len(text_field.vocab), config.embedding_size)
+    loc_embedding = nn.Embedding(len(loc_field.vocab), config.embedding_size)
+    gender_embedding = nn.Embedding(len(gender_field.vocab), config.embedding_size)
+
+    model = AttPAB(
+        text_embedding=text_embedding,
+        loc_embedding=loc_embedding,
+        gender_embedding=gender_embedding,
         embedding_size=config.embedding_size,
         hidden_size=config.hidden_size,
         start_index=text_field.vocab.stoi[BOS_TOKEN],
