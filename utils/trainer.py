@@ -57,7 +57,7 @@ class Trainer(object):
                                               "=" * 34 + " Model Training " + "=" * 35,
                                               "=" * 85,
                                               ""])
-        self.valid_start_message = "\n" + "-" * 33 + " Model Evaulation " + "-" * 33
+        self.valid_start_message = "\n" + "-" * 33 + " Model Evaluation " + "-" * 33
 
     def summarize_train_metrics(self, metrics, global_step):
         """
@@ -142,7 +142,7 @@ class Trainer(object):
         for _ in range(self.epoch, self.num_epochs):
             self.train_epoch()
         self.logger.info('Train finished!\n')
-        self.logger.info(f'Best model state at epoch {self.best_epoch}.\n')
+        self.logger.info('Best model state at epoch {}.\n'.format(self.best_epoch))
 
     def save(self, is_best=False):
         """

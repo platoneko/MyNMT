@@ -6,3 +6,4 @@ vocab.txt
 outputs/*
 results/*
 *.pt
+*.zip
