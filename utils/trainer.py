@@ -102,7 +102,8 @@ class Trainer(object):
 
             if batch_id % self.log_steps == 0:
                 message_prefix = "[Train][{:2d}][{}/{}]".format(self.epoch, batch_id, num_batches)
-                metrics_message = train_mm.report_val()
+                metrics_message = train_mm.report_cum()
+                train_mm.clear()
                 message_posfix = "TIME-{:.2f}".format(elapsed)
                 self.logger.info("   ".join(
                     [message_prefix, metrics_message, message_posfix]))
@@ -139,6 +140,8 @@ class Trainer(object):
         """
         train
         """
+        valid_mm = self.evaluate()
+        self.logger.info(valid_mm.report_cum())
         for _ in range(self.epoch, self.num_epochs):
             self.train_epoch()
         self.logger.info('Train finished!\n')

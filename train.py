@@ -55,6 +55,7 @@ def get_config():
     train_arg.add_argument("--grad_clip", type=float, default=5.0)
     train_arg.add_argument("--num_epochs", type=int, default=20)
     train_arg.add_argument("--lr_decay", type=float, default=None)
+    train_arg.add_argument("--valid_metric", type=str, default="-loss")
 
     # MISC
     misc_arg = parser.add_argument_group("Misc")
@@ -271,7 +272,7 @@ def main():
         train_iter=train_iter,
         valid_iter=valid_iter,
         logger=logger,
-        valid_metric_name="-loss",
+        valid_metric_name=config.valid_metric,
         num_epochs=config.num_epochs,
         save_dir=config.save_dir,
         log_steps=config.log_steps,
