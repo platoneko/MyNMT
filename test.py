@@ -9,11 +9,7 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
-from models.att_pab import AttPAB
-from models.redecode_att_pab import RedecodeAttPAB
-from models.redecode import Redecode
 from utils.generator import Generator
-from utils.redecode_generator import RedecodeGenerator
 
 import pickle
 
@@ -87,28 +83,9 @@ def main():
         include_lengths=True
     )
 
-    tag_field = Field(
-        sequential=True,
-        tokenize=tokenizer,
-        lower=True,
-        batch_first=True,
-    )
-
-    tags_field = NestedField(
-        nesting_field=tag_field,
-        include_lengths=True,
-        tokenize=tokenizer
-    )
-
-    gender_field = Field(sequential=False)
-    loc_field = Field(sequential=False)
-
     fields = {
         'post': ('post', text_field),
         'response': ('response', text_field),
-        'gender': ('gender', gender_field),
-        'loc': ('loc', loc_field),
-        'tag': ('tags', tags_field)
     }
 
     test_data = TabularDataset(
@@ -119,11 +96,6 @@ def main():
 
     with open(os.path.join(config.vocab_dir, 'vocab.pkl'), 'rb') as vocab_file:
         text_field.vocab = pickle.load(vocab_file)
-        tag_field.vocab = text_field.vocab
-    with open(os.path.join(config.vocab_dir, 'loc.pkl'), 'rb') as loc_file:
-        loc_field.vocab = pickle.load(loc_file)
-    with open(os.path.join(config.vocab_dir, 'gender.pkl'), 'rb') as gender_file:
-        gender_field.vocab = pickle.load(gender_file)
 
     test_iter = BucketIterator(
         test_data,
@@ -134,54 +106,12 @@ def main():
 
     # Model definition
     text_embedding = nn.Embedding(len(text_field.vocab), config.embedding_size)
-    loc_embedding = nn.Embedding(len(loc_field.vocab), config.embedding_size)
-    gender_embedding = nn.Embedding(len(gender_field.vocab), config.embedding_size)
 
-    assert config.model in ['Seq2Seq', 'AttPAB', 'RedecodeAttPAB', 'Redecode']
+    assert config.model in ['Seq2Seq']
 
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
             embedding=text_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    elif config.model == 'AttPAB':
-        model = AttPAB(
-            text_embedding=text_embedding,
-            loc_embedding=loc_embedding,
-            gender_embedding=gender_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    elif config.model == 'RedecodeAttPAB':
-        model = RedecodeAttPAB(
-            text_embedding=text_embedding,
-            loc_embedding=loc_embedding,
-            gender_embedding=gender_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    elif config.model == 'Redecode':
-        model = Redecode(
-            text_embedding=text_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
             start_index=text_field.vocab.stoi[BOS_TOKEN],
@@ -206,26 +136,16 @@ def main():
     # Generator definition
     if config.per_node_beam_size is None:
         config.per_node_beam_size = config.beam_size
-    if config.model == 'Redecode' or config.model == 'RedecodeAttPAB':
-        generator = RedecodeGenerator(
-            model=model,
-            data_iter=test_iter,
-            vocab=text_field.vocab,
-            logger=logger,
-            beam_size=config.beam_size,
-            per_node_beam_size=config.per_node_beam_size,
-            result_path=os.path.join(config.save_dir, "result.txt")
-        )
-    else:
-        generator = Generator(
-            model=model,
-            data_iter=test_iter,
-            vocab=text_field.vocab,
-            logger=logger,
-            beam_size=config.beam_size,
-            per_node_beam_size=config.per_node_beam_size,
-            result_path=os.path.join(config.save_dir, "result.txt")
-        )
+
+    generator = Generator(
+        model=model,
+        data_iter=test_iter,
+        vocab=text_field.vocab,
+        logger=logger,
+        beam_size=config.beam_size,
+        per_node_beam_size=config.per_node_beam_size,
+        result_path=os.path.join(config.save_dir, "result.txt")
+    )
 
     # Save config
     params_file = os.path.join(config.save_dir, "params.json")

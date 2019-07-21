@@ -1,4 +1,6 @@
 dataset/*
+vocab/*
+vector/*
 *.json
 vocab.txt
 .idea/*

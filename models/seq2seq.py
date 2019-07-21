@@ -4,7 +4,7 @@ from modules.attention import MLPAttention
 from modules.utils import *
 from models.base_model import BaseModel
 from utils.pack import Pack
-from utils.metrics import accuracy
+from utils.metrics import accuracy, perplexity
 from torch.nn.utils import clip_grad_norm_
 from modules.criterions import SequenceCrossEntropy
 
@@ -117,17 +117,16 @@ class Seq2Seq(BaseModel):
         """
         num_samples = target.size(0)
         metrics = Pack(num_samples=num_samples)
-        loss = 0
 
         logits = outputs.logits
         nll = self.cross_entropy(logits, target)
         predictions = logits.argmax(dim=2)
         acc = accuracy(predictions, target, padding_idx=self.padding_index)
-        ppl = nll.exp()
-        metrics.add(nll=nll, acc=acc, ppl=ppl)
-        loss += nll
-
-        metrics.add(loss=loss)
+        metrics.add(nll=nll, acc=acc)
+        if not self.training:
+            ppx = perplexity(logits, target, weight=self.cross_entropy.weight, padding_idx=self.padding_index)
+            metrics.add(ppx=ppx)
+        metrics.add(loss=nll)
         return metrics
 
     def iterate(self, inputs, optimizer=None, grad_clip=None):

@@ -10,9 +10,6 @@ from torchtext.data import BucketIterator
 from torchtext.vocab import Vectors
 
 from models.seq2seq import Seq2Seq
-from models.att_pab import AttPAB
-from models.redecode_att_pab import RedecodeAttPAB
-from models.redecode import Redecode
 from utils.trainer import Trainer
 
 import pickle
@@ -43,7 +40,7 @@ def get_config():
     model_arg = parser.add_argument_group("Model")
     model_arg.add_argument("--model", type=str, default='Seq2Seq')
     model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
-    model_arg.add_argument("--hidden_size", type=int, default=800)
+    model_arg.add_argument("--hidden_size", type=int, default=300)
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
     model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
@@ -95,28 +92,9 @@ def main():
         include_lengths=True
     )
 
-    tag_field = Field(
-        sequential=True,
-        tokenize=tokenizer,
-        lower=True,
-        batch_first=True,
-    )
-
-    tags_field = NestedField(
-        nesting_field=tag_field,
-        include_lengths=True,
-        tokenize=tokenizer
-    )
-
-    gender_field = Field(sequential=False)
-    loc_field = Field(sequential=False)
-
     fields = {
         'post': ('post', text_field),
         'response': ('response', text_field),
-        'gender': ('gender', gender_field),
-        'loc': ('loc', loc_field),
-        'tag': ('tags', tags_field)
     }
 
     train_data = TabularDataset(
@@ -134,34 +112,20 @@ def main():
     if not os.path.exists(config.vocab_dir):
         if not os.path.exists(config.vector_dir):
             os.mkdir(config.vector_dir)
-        vectors = Vectors(name='./dataset/sgns.weibo.bigram-char', cache=config.vector_dir)
+        vectors = Vectors(name='./dataset/glove.6B.300d.txt', cache=config.vector_dir)
 
         text_field.build_vocab(train_data.post,
                                train_data.response,
-                               train_data.tag,
                                vectors=vectors,
                                max_size=config.max_vocab_size,
                                min_freq=config.min_freq)
-        tag_field.vocab = text_field.vocab
-
-        gender_field.build_vocab(train_data)
-        loc_field.build_vocab(train_data)
 
         os.mkdir(config.vocab_dir)
         with open(os.path.join(config.vocab_dir, 'vocab.pkl'), 'wb') as vocab_file:
             pickle.dump(text_field.vocab, vocab_file)
-        with open(os.path.join(config.vocab_dir, 'loc.pkl'), 'wb') as loc_file:
-            pickle.dump(loc_field.vocab, loc_file)
-        with open(os.path.join(config.vocab_dir, 'gender.pkl'), 'wb') as gender_file:
-            pickle.dump(gender_field.vocab, gender_file)
     else:
         with open(os.path.join(config.vocab_dir, 'vocab.pkl'), 'rb') as vocab_file:
             text_field.vocab = pickle.load(vocab_file)
-            tag_field.vocab = text_field.vocab
-        with open(os.path.join(config.vocab_dir, 'loc.pkl'), 'rb') as loc_file:
-            loc_field.vocab = pickle.load(loc_file)
-        with open(os.path.join(config.vocab_dir, 'gender.pkl'), 'rb') as gender_file:
-            gender_field.vocab = pickle.load(gender_file)
 
     train_iter = BucketIterator(
         train_data,
@@ -179,53 +143,11 @@ def main():
     # Model definition
     text_embedding = nn.Embedding(len(text_field.vocab), config.embedding_size)
     text_embedding.weight = nn.Parameter(text_field.vocab.vectors)
-    loc_embedding = nn.Embedding(len(loc_field.vocab), config.embedding_size)
-    gender_embedding = nn.Embedding(len(gender_field.vocab), config.embedding_size)
 
-    assert config.model in ['Seq2Seq', 'AttPAB', 'RedecodeAttPAB', 'Redecode']
+    assert config.model in ['Seq2Seq']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
             embedding=text_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    elif config.model == 'AttPAB':
-        model = AttPAB(
-            text_embedding=text_embedding,
-            loc_embedding=loc_embedding,
-            gender_embedding=gender_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    elif config.model == 'RedecodeAttPAB':
-        model = RedecodeAttPAB(
-            text_embedding=text_embedding,
-            loc_embedding=loc_embedding,
-            gender_embedding=gender_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    elif config.model == 'Redecode':
-        model = Redecode(
-            text_embedding=text_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
             start_index=text_field.vocab.stoi[BOS_TOKEN],

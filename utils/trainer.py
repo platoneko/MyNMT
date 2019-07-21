@@ -86,21 +86,21 @@ class Trainer(object):
         num_batches = len(self.train_iter)
         self.logger.info(self.train_start_message)
 
+        start_time = time.time()
         for batch_id, inputs in enumerate(self.train_iter, 1):
             self.model.train()
-            start_time = time.time()
             # Do a training iteration
             metrics = self.model.iterate(
                 inputs,
                 optimizer=self.optimizer,
                 grad_clip=self.grad_clip,
             )
-            elapsed = time.time() - start_time
 
             train_mm.update(metrics)
             self.batch_num += 1
 
             if batch_id % self.log_steps == 0:
+                elapsed = time.time() - start_time
                 message_prefix = "[Train][{:2d}][{}/{}]".format(self.epoch, batch_id, num_batches)
                 metrics_message = train_mm.report_cum()
                 train_mm.clear()
@@ -109,14 +109,18 @@ class Trainer(object):
                     [message_prefix, metrics_message, message_posfix]))
                 if self.save_summary:
                     self.summarize_train_metrics(metrics, self.batch_num)
+                start_time = time.time()
 
             if batch_id % self.valid_steps == 0:
                 self.logger.info(self.valid_start_message)
+                start_time = time.time()
                 valid_mm = self.evaluate()
+                elapsed = time.time() - start_time
 
                 message_prefix = "[Valid][{:2d}][{}/{}]".format(self.epoch, batch_id, num_batches)
+                message_posfix = "TIME-{:.2f}".format(elapsed)
                 metrics_message = valid_mm.report_cum()
-                self.logger.info("   ".join([message_prefix, metrics_message]))
+                self.logger.info("   ".join([message_prefix, metrics_message, message_posfix]))
 
                 if self.save_summary:
                     self.summarize_valid_metrics(valid_mm, self.batch_num)
@@ -132,6 +136,7 @@ class Trainer(object):
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step(cur_valid_metric)
                 self.logger.info("-" * 85 + "\n")
+                start_time = time.time()
 
         self.save()
         self.logger.info('')
@@ -140,8 +145,6 @@ class Trainer(object):
         """
         train
         """
-        valid_mm = self.evaluate()
-        self.logger.info(valid_mm.report_cum())
         for _ in range(self.epoch, self.num_epochs):
             self.train_epoch()
         self.logger.info('Train finished!\n')

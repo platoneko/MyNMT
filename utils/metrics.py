@@ -24,7 +24,8 @@ def accuracy(preds, targets, padding_idx=None):
     trues = (preds == targets).float()
     if padding_idx is not None:
         weights = targets.ne(padding_idx).float()
-        acc = (weights * trues).sum() / weights.sum()
+        acc = (weights * trues).sum(1) / weights.sum(1)
+        acc = acc.mean()
     else:
         acc = trues.mean()
     return acc
@@ -36,7 +37,7 @@ def perplexity(logits, targets, weight=None, padding_idx=None):
     logits : (batch_size, max_len, num_classes)
     targets : (batch_size, max_len)
     :return
-    ppl : (batch_size,)
+    ppl : (1)
     """
     batch_size = logits.size(0)
     if weight is None and padding_idx is not None:
@@ -52,7 +53,7 @@ def perplexity(logits, targets, weight=None, padding_idx=None):
     if padding_idx is not None:
         word_cnt = targets.ne(padding_idx).float().sum(dim=1)
         nll = nll / word_cnt
-    ppl = nll.exp()
+    ppl = nll.exp().mean()
     return ppl
 
 

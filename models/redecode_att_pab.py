@@ -406,11 +406,11 @@ class RedecodeAttPABDecoder(nn.Module):
         # shape: (batch_size, input_size)
         embedded_inputs = self.text_embedding(inputs)
         # shape: (batch_size, num_rows)
-        decoder_1_attn_score = self.decoder_1_attn(hidden[-1], attn_value, attn_mask)
-        decoder_1_attn_inputs = torch.sum(decoder_1_attn_score.unsqueeze(2) * attn_value, dim=1)
+        post_attn_score = self.decoder_2_attn(hidden[-1], attn_value, attn_mask)
+        post_attn_inputs = torch.sum(post_attn_score.unsqueeze(2) * attn_value, dim=1)
 
-        decoder_2_attn_score = self.decoder_2_attn(hidden[-1], pred_value, pred_mask)
-        decoder_2_attn_inputs = torch.sum(decoder_2_attn_score.unsqueeze(2) * pred_value, dim=1)
+        pred_attn_score = self.decoder_2_attn(hidden[-1], pred_value, pred_mask)
+        pred_attn_inputs = torch.sum(pred_attn_score.unsqueeze(2) * pred_value, dim=1)
 
         encoded_tags, tags_mask = tags
         # shape: (batch_size, num_tags)
@@ -423,7 +423,7 @@ class RedecodeAttPABDecoder(nn.Module):
         weighted_profile = torch.sum(profile_attn_score.unsqueeze(2) * profile, dim=1)
 
         # shape: (batch_size, input_size + hidden_size*2)
-        decoder_2_inputs = torch.cat([embedded_inputs, decoder_1_attn_inputs, decoder_2_attn_inputs], dim=-1)
+        decoder_2_inputs = torch.cat([embedded_inputs, post_attn_inputs, pred_attn_inputs], dim=-1)
         _, next_hidden = self.decoder_2(decoder_2_inputs.unsqueeze(1), hidden)
         # shape: (batch_size, num_classes)
         outputs = self.output_layer(next_hidden[-1], weighted_profile)
