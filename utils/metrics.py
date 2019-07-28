@@ -4,11 +4,10 @@ import torch.nn.functional as F
 
 from collections import Counter
 from nltk.translate import bleu_score
-from nltk.translate.bleu_score import SmoothingFunction
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def accuracy(preds, targets, padding_idx=None):
+def accuracy(preds, targets, padding_idx=None, end_idx=None, reduction='token'):
     """
     preds: (batch_size, preds_len)
     targets: (batch_size, targets_len)
@@ -18,16 +17,32 @@ def accuracy(preds, targets, padding_idx=None):
     if preds_len > targets_len:
         preds = preds[:, :targets_len]
     elif preds_len < targets_len:
-        tensor = targets.new_full((batch_size, targets_len), fill_value=-1)
+        tensor = targets.new_full((batch_size, targets_len), fill_value=padding_idx)
         tensor[:, :preds_len] = preds
         preds = tensor
     trues = (preds == targets).float()
-    if padding_idx is not None:
-        weights = targets.ne(padding_idx).float()
-        acc = (weights * trues).sum(1) / weights.sum(1)
-        acc = acc.mean()
+
+    assert reduction in ['batch', 'token']
+    if reduction == 'batch':
+        if padding_idx is not None:
+            weights = targets.ne(padding_idx)
+            if end_idx is not None:
+                weights = weights & targets.ne(end_idx)
+            weights = weights.float()
+            acc = (weights * trues).sum(1) / (weights.sum(1) + 1e-7)
+            acc = acc.mean()
+        else:
+            acc = trues.mean()
     else:
-        acc = trues.mean()
+        if padding_idx is not None:
+            weights = targets.ne(padding_idx)
+            if end_idx is not None:
+                weights = weights & targets.ne(end_idx)
+            weights = weights.float()
+            acc = (weights * trues).sum() / (weights.sum() + 1e-7)
+        else:
+            acc = trues.mean()
+
     return acc
 
 
@@ -61,28 +76,15 @@ def bleu(hyps, refs):
     """
     bleu
     """
-    bleu_1 = []
-    bleu_2 = []
+    bleu = []
     for hyp, ref in zip(hyps, refs):
         try:
-            score = bleu_score.sentence_bleu(
-                [ref], hyp,
-                smoothing_function=SmoothingFunction().method7,
-                weights=[1, 0, 0, 0])
+            score = bleu_score.sentence_bleu([ref], hyp)
         except:
             score = 0
-        bleu_1.append(score)
-        try:
-            score = bleu_score.sentence_bleu(
-                [ref], hyp,
-                smoothing_function=SmoothingFunction().method7,
-                weights=[0.5, 0.5, 0, 0])
-        except:
-            score = 0
-        bleu_2.append(score)
-    bleu_1 = np.average(bleu_1)
-    bleu_2 = np.average(bleu_2)
-    return bleu_1, bleu_2
+        bleu.append(score)
+    bleu = np.average(bleu)
+    return bleu
 
 
 def distinct(seqs):

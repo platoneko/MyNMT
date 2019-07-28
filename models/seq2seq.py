@@ -7,12 +7,14 @@ from utils.pack import Pack
 from utils.metrics import accuracy, perplexity
 from torch.nn.utils import clip_grad_norm_
 from modules.criterions import SequenceCrossEntropy
+import torch.nn as nn
 
 
 class Seq2Seq(BaseModel):
     def __init__(
             self,
-            embedding,
+            post_embedding,
+            response_embedding,
             embedding_size,
             hidden_size,
             start_index,
@@ -23,7 +25,8 @@ class Seq2Seq(BaseModel):
             teaching_force_rate=0.5,
     ):
         super().__init__()
-        self.embedding = embedding
+        self.post_embedding = post_embedding
+        self.response_embedding = response_embedding
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
         self.start_index = start_index
@@ -33,25 +36,24 @@ class Seq2Seq(BaseModel):
         self.teaching_force_rate = teaching_force_rate
         self.num_layers = num_layers
 
-        self.encoder = GRUEncoder(embedding_size, hidden_size // 2, dropout=dropout, num_layers=num_layers)
+        self.encoder = GRUEncoder(embedding_size, hidden_size//2,
+                                  dropout=dropout, num_layers=num_layers, bidirectional=True)
 
         decoder_attn = MLPAttention(hidden_size, hidden_size, hidden_size)
         decoder_input_size = embedding_size + hidden_size
-        num_classes = embedding.weight.size(0)
+        num_classes = response_embedding.weight.size(0)
         self.decoder = StackGRUDecoder(
             decoder_input_size,
             hidden_size,
             num_classes,
             start_index,
             end_index,
-            embedding,
+            response_embedding,
             num_layers=num_layers,
             attention=decoder_attn,
             dropout=dropout
         )
-        weight = torch.ones(num_classes)
-        weight[padding_index] = 0.0
-        self.cross_entropy = SequenceCrossEntropy(padding_idx=padding_index, weight=weight)
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index)
 
     def forward(self, inputs, evaluation=False):
         """
@@ -63,9 +65,9 @@ class Seq2Seq(BaseModel):
             response_token, response_len = inputs.response
 
         post_token, post_len = inputs.post
-        embedded_post = self.embedding(post_token)
+        embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = post_token.ne(self.padding_index)
+        encoder_outputs_mask = get_sequence_mask(post_len)
         if self.training:
             logits = self.decoder(
                 encoder_hidden,
@@ -97,9 +99,9 @@ class Seq2Seq(BaseModel):
     def beam_search(self, inputs, beam_size=4, per_node_beam_size=4):
         # designed for test or interactive mode
         post_token, post_len = inputs.post
-        embedded_post = self.embedding(post_token)
+        embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = post_token.ne(self.padding_index)
+        encoder_outputs_mask = get_sequence_mask(post_len)
         all_top_k_predictions, log_probabilities = \
             self.decoder.forward_beam_search(encoder_hidden,
                                              attn_value=encoder_outputs,
@@ -119,13 +121,11 @@ class Seq2Seq(BaseModel):
         metrics = Pack(num_samples=num_samples)
 
         logits = outputs.logits
-        nll = self.cross_entropy(logits, target)
+        nll = self.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
         predictions = logits.argmax(dim=2)
-        acc = accuracy(predictions, target, padding_idx=self.padding_index)
+        acc = accuracy(predictions, target, padding_idx=self.padding_index, end_idx=self.end_index)
         metrics.add(nll=nll, acc=acc)
-        if not self.training:
-            ppx = perplexity(logits, target, weight=self.cross_entropy.weight, padding_idx=self.padding_index)
-            metrics.add(ppx=ppx)
+        metrics.add(ppx=math.exp(nll.item()))
         metrics.add(loss=nll)
         return metrics
 

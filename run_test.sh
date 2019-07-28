@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-python ./test.py --data_path=./dataset/mini_train_data.json \
---gpu=0 \
---batch_size=16 \
+python ./test.py --data_path=./dataset/opensub_valid.tsv \
+--gpu=-1 \
+--batch_size=32 \
 --beam_size=1 \
---model=Seq2Seq \
+--model=Baidu \
+--vocab_dir=./vocab \
 --ckpt=./outputs/best.model

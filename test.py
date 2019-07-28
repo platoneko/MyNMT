@@ -9,6 +9,7 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
+from models.baidu_seq2seq import BaiduSeq2Seq
 from utils.generator import Generator
 
 import pickle
@@ -29,14 +30,12 @@ def get_config():
     # Data
     data_arg = parser.add_argument_group("Data")
     data_arg.add_argument("--data_path", type=str, required=True)
-    data_arg.add_argument("--vector_dir", type=str, default="./dataset/vector")
-    data_arg.add_argument("--vocab_dir", type=str, default="./dataset/vocab")
 
     # Model
     model_arg = parser.add_argument_group("Model")
     model_arg.add_argument("--model", type=str, default='Seq2Seq')
-    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
-    model_arg.add_argument("--hidden_size", type=int, default=800)
+    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
+    model_arg.add_argument("--hidden_size", type=int, default=500)
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
     model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
@@ -53,6 +52,8 @@ def get_config():
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str, default="./outputs/best.model")
     data_arg.add_argument("--save_dir", type=str, default="./results")
+    data_arg.add_argument("--vocab_dir", type=str, default="./dataset/vocab")
+
 
     config = parser.parse_args()
 
@@ -73,54 +74,81 @@ def main():
     # Data definition
     tokenizer = lambda x: x.split()
 
-    text_field = Field(
+    post_field = Field(
+        sequential=True,
+        tokenize=tokenizer,
+        unk_token=UNK_TOKEN,
+        pad_token=PAD_TOKEN,
+        lower=True,
+        batch_first=True,
+        include_lengths=True
+    )
+    response_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
+        unk_token=UNK_TOKEN,
+        pad_token=PAD_TOKEN,
         init_token=BOS_TOKEN,
         eos_token=EOS_TOKEN,
         include_lengths=True
     )
 
     fields = {
-        'post': ('post', text_field),
-        'response': ('response', text_field),
+        'post': ('post', post_field),
+        'response': ('response', response_field),
     }
 
     test_data = TabularDataset(
         path=config.data_path,
-        format='json',
+        format='tsv',
         fields=fields
     )
 
-    with open(os.path.join(config.vocab_dir, 'vocab.pkl'), 'rb') as vocab_file:
-        text_field.vocab = pickle.load(vocab_file)
+    with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
+        post_field.vocab = pickle.load(vocab_file)
+    with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
+        response_field.vocab = pickle.load(vocab_file)
 
     test_iter = BucketIterator(
         test_data,
         batch_size=config.batch_size,
         device=device,
-        shuffle=True
+        shuffle=False
     )
 
     # Model definition
-    text_embedding = nn.Embedding(len(text_field.vocab), config.embedding_size)
+    post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
+    response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
 
-    assert config.model in ['Seq2Seq']
-
+    assert config.model in ['Seq2Seq', 'Baidu']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
-            embedding=text_embedding,
+            post_embedding=post_embedding,
+            response_embedding=response_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
+            start_index=response_field.vocab.stoi[BOS_TOKEN],
+            end_index=response_field.vocab.stoi[EOS_TOKEN],
+            padding_index=response_field.vocab.stoi[PAD_TOKEN],
             dropout=config.dropout,
             teaching_force_rate=config.teaching_force_rate,
             num_layers=config.num_layers
         )
+    else:
+        model = BaiduSeq2Seq(
+            post_embedding,
+            response_embedding,
+            embed_size=config.embedding_size,
+            hidden_size=config.hidden_size,
+            padding_idx=response_field.vocab.stoi[PAD_TOKEN],
+            end_idx=response_field.vocab.stoi[EOS_TOKEN],
+            num_layers=config.num_layers,
+            bidirectional=True,
+            attn_mode="mlp",
+            with_bridge=False,
+            dropout=config.dropout)
     model.load(filename=config.ckpt)
     model.to(device)
 
@@ -140,7 +168,7 @@ def main():
     generator = Generator(
         model=model,
         data_iter=test_iter,
-        vocab=text_field.vocab,
+        vocab=response_field.vocab,
         logger=logger,
         beam_size=config.beam_size,
         per_node_beam_size=config.per_node_beam_size,

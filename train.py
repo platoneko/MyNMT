@@ -10,6 +10,7 @@ from torchtext.data import BucketIterator
 from torchtext.vocab import Vectors
 
 from models.seq2seq import Seq2Seq
+from models.baidu_seq2seq import BaiduSeq2Seq
 from utils.trainer import Trainer
 
 import pickle
@@ -31,7 +32,6 @@ def get_config():
     data_arg = parser.add_argument_group("Data")
     data_arg.add_argument("--train_path", type=str, required=True)
     data_arg.add_argument("--valid_path", type=str, required=True)
-    data_arg.add_argument("--vector_dir", type=str, default="./dataset/vector")
     data_arg.add_argument("--vocab_dir", type=str, default="./dataset/vocab")
     data_arg.add_argument("--max_vocab_size", type=int, default=50000)
     data_arg.add_argument("--min_freq", type=int, default=5)
@@ -39,16 +39,16 @@ def get_config():
     # Model
     model_arg = parser.add_argument_group("Model")
     model_arg.add_argument("--model", type=str, default='Seq2Seq')
-    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
-    model_arg.add_argument("--hidden_size", type=int, default=300)
+    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
+    model_arg.add_argument("--hidden_size", type=int, default=500)
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
     model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
 
     # Training
     train_arg = parser.add_argument_group("Training")
-    train_arg.add_argument("--optimizer", type=str, default="Adam")
-    train_arg.add_argument("--lr", type=float, default=0.0005)
+    train_arg.add_argument("--optimizer", type=str, default="SGD")
+    train_arg.add_argument("--lr", type=float, default=0.01)
     train_arg.add_argument("--grad_clip", type=float, default=5.0)
     train_arg.add_argument("--num_epochs", type=int, default=20)
     train_arg.add_argument("--lr_decay", type=float, default=None)
@@ -82,7 +82,14 @@ def main():
     # Data definition
     tokenizer = lambda x: x.split()
 
-    text_field = Field(
+    post_field = Field(
+        sequential=True,
+        tokenize=tokenizer,
+        lower=True,
+        batch_first=True,
+        include_lengths=True
+    )
+    response_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
@@ -93,39 +100,43 @@ def main():
     )
 
     fields = {
-        'post': ('post', text_field),
-        'response': ('response', text_field),
+        'post': ('post', post_field),
+        'response': ('response', response_field),
     }
 
     train_data = TabularDataset(
         path=config.train_path,
-        format='json',
+        format='tsv',
         fields=fields
     )
 
     valid_data = TabularDataset(
         path=config.valid_path,
-        format='json',
+        format='tsv',
         fields=fields
     )
 
     if not os.path.exists(config.vocab_dir):
-        if not os.path.exists(config.vector_dir):
-            os.mkdir(config.vector_dir)
-        vectors = Vectors(name='./dataset/glove.6B.300d.txt', cache=config.vector_dir)
+        post_field.build_vocab(
+            train_data.post,
+            max_size=config.max_vocab_size,
+            min_freq=config.min_freq)
 
-        text_field.build_vocab(train_data.post,
-                               train_data.response,
-                               vectors=vectors,
-                               max_size=config.max_vocab_size,
-                               min_freq=config.min_freq)
+        response_field.build_vocab(
+            train_data.response,
+            max_size=config.max_vocab_size,
+            min_freq=config.min_freq)
 
         os.mkdir(config.vocab_dir)
-        with open(os.path.join(config.vocab_dir, 'vocab.pkl'), 'wb') as vocab_file:
-            pickle.dump(text_field.vocab, vocab_file)
+        with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'wb') as vocab_file:
+            pickle.dump(post_field.vocab, vocab_file)
+        with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'wb') as vocab_file:
+            pickle.dump(response_field.vocab, vocab_file)
     else:
-        with open(os.path.join(config.vocab_dir, 'vocab.pkl'), 'rb') as vocab_file:
-            text_field.vocab = pickle.load(vocab_file)
+        with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
+            post_field.vocab = pickle.load(vocab_file)
+        with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
+            response_field.vocab = pickle.load(vocab_file)
 
     train_iter = BucketIterator(
         train_data,
@@ -141,26 +152,45 @@ def main():
     )
 
     # Model definition
-    text_embedding = nn.Embedding(len(text_field.vocab), config.embedding_size)
-    text_embedding.weight = nn.Parameter(text_field.vocab.vectors)
+    post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
+    response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
 
-    assert config.model in ['Seq2Seq']
+    assert config.model in ['Seq2Seq', 'Baidu']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
-            embedding=text_embedding,
+            post_embedding=post_embedding,
+            response_embedding=response_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
-            start_index=text_field.vocab.stoi[BOS_TOKEN],
-            end_index=text_field.vocab.stoi[EOS_TOKEN],
-            padding_index=text_field.vocab.stoi[PAD_TOKEN],
+            start_index=response_field.vocab.stoi[BOS_TOKEN],
+            end_index=response_field.vocab.stoi[EOS_TOKEN],
+            padding_index=response_field.vocab.stoi[PAD_TOKEN],
             dropout=config.dropout,
             teaching_force_rate=config.teaching_force_rate,
             num_layers=config.num_layers
         )
+    else:
+        model = BaiduSeq2Seq(
+            post_embedding,
+            response_embedding,
+            embed_size=config.embedding_size,
+            hidden_size=config.hidden_size,
+            padding_idx=response_field.vocab.stoi[PAD_TOKEN],
+            end_idx=response_field.vocab.stoi[EOS_TOKEN],
+            num_layers=config.num_layers,
+            bidirectional=True,
+            attn_mode="mlp",
+            with_bridge=False,
+            dropout=config.dropout)
     model.to(device)
 
     # Optimizer definition
-    optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+    assert config.optimizer in ['SGD', 'Adam']
+    if config.optimizer == 'SGD':
+        optimizer = torch.optim.SGD(model.parameters(), lr=config.lr, momentum=0.9, nesterov=True)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+
     # Learning rate scheduler
     if config.lr_decay is not None and 0 < config.lr_decay < 1.0:
         lr_scheduler = \

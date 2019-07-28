@@ -42,6 +42,57 @@ def masked_softmax(vector, mask, dim=-1,
     return result
 
 
+def masked_sum(vector, mask, dim, keepdim=False, eps=1e-8):
+    """
+    To calculate sum along certain dimensions on masked values
+
+    :param
+    vector : ``torch.Tensor``
+        The vector to calculate mean.
+    mask : ``torch.Tensor``
+        The mask of the vector. It must be broadcastable with vector.
+    dim : ``int``
+        The dimension to calculate mean
+    keepdim : ``bool``
+        Whether to keep dimension
+    eps : ``float``
+        A small value to avoid zero division problem.
+
+    :return
+    A ``torch.Tensor`` of including the mean values.
+    """
+    one_minus_mask = (1.0 - mask).byte()
+    replaced_vector = vector.masked_fill(one_minus_mask, 0.0)
+    value_sum = torch.sum(replaced_vector, dim=dim, keepdim=keepdim)
+    return value_sum
+
+
+def masked_mean(vector, mask, dim, keepdim=False, eps=1e-8):
+    """
+    To calculate mean along certain dimensions on masked values
+
+    :param
+    vector : ``torch.Tensor``
+        The vector to calculate mean.
+    mask : ``torch.Tensor``
+        The mask of the vector. It must be broadcastable with vector.
+    dim : ``int``
+        The dimension to calculate mean
+    keepdim : ``bool``
+        Whether to keep dimension
+    eps : ``float``
+        A small value to avoid zero division problem.
+
+    :return
+    A ``torch.Tensor`` of including the mean values.
+    """
+    one_minus_mask = (1.0 - mask).byte()
+    replaced_vector = vector.masked_fill(one_minus_mask, 0.0)
+    value_sum = torch.sum(replaced_vector, dim=dim, keepdim=keepdim)
+    value_count = torch.sum(mask.float(), dim=dim, keepdim=keepdim)
+    return value_sum / value_count.clamp(min=eps)
+
+
 def sequence_cross_entropy_with_logits(logits,
                                        targets,
                                        weights,
@@ -209,7 +260,6 @@ def create_positional_features(timesteps,
     # so half for each.
     num_timescales = hidden_size // 2
     timescale_range = get_range_vector(num_timescales, device).data.float()
-
     log_timescale_increments = math.log(float(max_timescale) / float(min_timescale)) / float(num_timescales - 1)
     inverse_timescales = min_timescale * torch.exp(timescale_range * -log_timescale_increments)
 

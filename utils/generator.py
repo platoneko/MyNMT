@@ -2,6 +2,7 @@ import torch
 from utils.metrics_manager import MetricsManager
 from utils.metrics import accuracy, bleu, distinct
 from utils.pack import Pack
+import math
 
 
 class Generator(object):
@@ -42,11 +43,14 @@ class Generator(object):
         """
         iterate
         """
-        outputs = Pack()
-        # We need greedy search to obtain PPL
-        eval_outputs = self.model.forward(inputs, evaluation=True)
-        logits = eval_outputs.logits
-        outputs.add(logits=logits)
+        enc_inputs = inputs.post
+        dec_inputs = inputs.response[0][:, :-1], inputs.response[1] - 1
+        outputs = self.model.forward(enc_inputs, dec_inputs)
+        target = inputs.response[0][:, 1:]
+        # We need greedy search to obtain PPX
+
+        outputs.add(logits=outputs.logits)
+        '''
         if self.beam_size == 1:
             test_outputs = self.model.forward(inputs, evaluation=False)
             predictions = test_outputs.logits.argmax(dim=2)
@@ -55,8 +59,7 @@ class Generator(object):
             test_outputs = \
                 self.model.beam_search(inputs, self.beam_size, self.per_node_beam_size)
             outputs.add(predictions=test_outputs.predictions)
-        response_token, response_len = inputs.response
-        target = response_token[:, 1:]
+        '''
         metrics = self.collect_metrics(outputs, target)
         return metrics
 
@@ -68,25 +71,26 @@ class Generator(object):
         metrics = Pack(num_samples=num_samples)
 
         logits = outputs.logits
-        nll = self.model.cross_entropy(logits, target)
-        ppl = nll.exp()
-        metrics.add(nll=nll, ppl=ppl)
+        nll = self.model.nll_loss(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
+        ppx = math.exp(min(nll.item(), 100))
+        metrics.add(nll=nll, ppx=ppx)
 
-        predictions = outputs.predictions
-        acc = accuracy(predictions, target, padding_idx=self.model.padding_index)
+        predictions = logits.argmax(2)
+        acc = accuracy(predictions, target, padding_idx=self.model.padding_index, end_idx=self.model.end_index)
         predict_sentences = self.tensor2str(predictions)
+
         target_sentences = self.tensor2str(target)
-        bleu_1, bleu_2 = bleu(predict_sentences, target_sentences)
+        bleu_score = bleu(predict_sentences, target_sentences)
         intra_dist1, intra_dist2, inter_dist1, inter_dist2 = distinct(predict_sentences)
         metrics.add(acc=acc,
-                    bleu_1=bleu_1,
-                    bleu_2=bleu_2,
+                    bleu_score=bleu_score,
                     intra_dist1=intra_dist1,
                     intra_dist2=intra_dist2,
                     inter_dist1=inter_dist1,
                     inter_dist2=inter_dist2)
         if self.result_path is not None:
-            self.save_result(predict_sentences)
+            self.save_result(predict_sentences, info="-----------predict----------\n")
+            self.save_result(target_sentences, info="-----------target----------\n")
         return metrics
 
     def tensor2str(self, tensor):
@@ -102,11 +106,15 @@ class Generator(object):
             sentences.append(' '.join(token_list))
         return sentences
 
-    def save_result(self, sentences):
+    def save_result(self, sentences, info=None):
         if self._new_file:
             self._new_file = False
             with open(self.result_path, 'w') as result_file:
+                if info is not None:
+                    result_file.write(info)
                 result_file.writelines([s + '\n' for s in sentences])
         else:
             with open(self.result_path, 'a') as result_file:
+                if info is not None:
+                    result_file.write(info)
                 result_file.writelines([s + '\n' for s in sentences])

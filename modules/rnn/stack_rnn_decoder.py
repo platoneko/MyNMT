@@ -288,7 +288,7 @@ class StackLSTMDecoder(nn.Module):
             attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
             # shape: (batch_size, input_size + attn_size)
             rnn_inputs = torch.cat([embedded_inputs, attn_inputs], dim=-1)
-        next_hidden, next_cell_state = self.rnn(rnn_inputs.unsqueeze(1), hidden_tuple)
+        _, (next_hidden, next_cell_state) = self.rnn(rnn_inputs.unsqueeze(1), hidden_tuple)
         # shape: (batch_size, num_classes)
         outputs = self.output_layer(next_hidden[-1])
         return outputs, (next_hidden, next_cell_state)
