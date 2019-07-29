@@ -9,7 +9,6 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
-from models.baidu_seq2seq import BaiduSeq2Seq
 from utils.generator import Generator
 
 import pickle
@@ -38,7 +37,6 @@ def get_config():
     model_arg.add_argument("--hidden_size", type=int, default=500)
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
-    model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
 
     # Generator
     generator_arg = parser.add_argument_group("Generator")
@@ -122,7 +120,7 @@ def main():
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
 
-    assert config.model in ['Seq2Seq', 'Baidu']
+    assert config.model in ['Seq2Seq']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
             post_embedding=post_embedding,
@@ -133,22 +131,9 @@ def main():
             end_index=response_field.vocab.stoi[EOS_TOKEN],
             padding_index=response_field.vocab.stoi[PAD_TOKEN],
             dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
-        )
-    else:
-        model = BaiduSeq2Seq(
-            post_embedding,
-            response_embedding,
-            embed_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            padding_idx=response_field.vocab.stoi[PAD_TOKEN],
-            end_idx=response_field.vocab.stoi[EOS_TOKEN],
+            teaching_force_rate=0.0,
             num_layers=config.num_layers,
-            bidirectional=True,
-            attn_mode="mlp",
-            with_bridge=False,
-            dropout=config.dropout)
+        )
     model.load(filename=config.ckpt)
     model.to(device)
 

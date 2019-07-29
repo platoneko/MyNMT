@@ -180,14 +180,15 @@ def main():
             num_layers=config.num_layers,
             bidirectional=True,
             attn_mode="mlp",
-            with_bridge=False,
-            dropout=config.dropout)
+            with_bridge=True,
+            dropout=config.dropout
+        )
     model.to(device)
 
     # Optimizer definition
     assert config.optimizer in ['SGD', 'Adam']
     if config.optimizer == 'SGD':
-        optimizer = torch.optim.SGD(model.parameters(), lr=config.lr, momentum=0.9, nesterov=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=config.lr)
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 

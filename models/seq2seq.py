@@ -55,11 +55,11 @@ class Seq2Seq(BaseModel):
         )
         self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index)
 
-    def forward(self, inputs, evaluation=False):
+    def forward(self, inputs, is_training=True):
         """
         train and eval
         """
-        if self.training or evaluation:
+        if is_training:
             assert inputs.response is not None
         if hasattr(inputs, 'response'):
             response_token, response_len = inputs.response
@@ -68,21 +68,14 @@ class Seq2Seq(BaseModel):
         embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
         encoder_outputs_mask = get_sequence_mask(post_len)
-        if self.training:
+        if is_training:
             logits = self.decoder(
                 encoder_hidden,
                 target=response_token,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
-                teaching_force_rate=self.teaching_force_rate
-            )
-        elif evaluation:
-            # eval, we need to obtain targets max len, so `target` is required
-            logits = self.decoder(
-                encoder_hidden,
-                target=response_token,
-                attn_value=encoder_outputs,
-                attn_mask=encoder_outputs_mask
+                teaching_force_rate=self.teaching_force_rate,
+                is_training=is_training
             )
         else:
             # test
@@ -91,7 +84,7 @@ class Seq2Seq(BaseModel):
                 target=None,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
-                early_stop=True
+                is_training=False
             )
         outputs = Pack(logits=logits)
         return outputs
@@ -107,8 +100,7 @@ class Seq2Seq(BaseModel):
                                              attn_value=encoder_outputs,
                                              attn_mask=encoder_outputs_mask,
                                              beam_size=beam_size,
-                                             per_node_beam_size=per_node_beam_size,
-                                             early_stop=True)
+                                             per_node_beam_size=per_node_beam_size)
         predictions = all_top_k_predictions[:, 0, :]
         outputs = Pack(predictions=predictions)
         return outputs
@@ -133,7 +125,7 @@ class Seq2Seq(BaseModel):
         """
         iterate
         """
-        outputs = self.forward(inputs, evaluation=not self.training)
+        outputs = self.forward(inputs, is_training=True)
         response_token, response_len = inputs.response
         target = response_token[:, 1:]
         metrics = self.collect_metrics(outputs, target)

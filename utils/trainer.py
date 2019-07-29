@@ -187,11 +187,11 @@ class Trainer(object):
         model_file = "{}.model".format(file_prefix)
         train_file = "{}.train".format(file_prefix)
 
-        model_state_dict = torch.load(model_file)
+        model_state_dict = torch.load(model_file, map_location=lambda storage, loc: storage)
         self.model.load_state_dict(model_state_dict)
         self.logger.info("Loaded model state from '{}'".format(model_file))
 
-        train_state_dict = torch.load(train_file)
+        train_state_dict = torch.load(train_file, map_location=lambda storage, loc: storage)
         self.epoch = train_state_dict["epoch"]
         self.best_valid_metric = train_state_dict["best_valid_metric"]
         self.batch_num = train_state_dict["batch_num"]

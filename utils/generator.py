@@ -2,7 +2,12 @@ import torch
 from utils.metrics_manager import MetricsManager
 from utils.metrics import accuracy, bleu, distinct
 from utils.pack import Pack
-import math
+
+
+BOS_TOKEN = "<bos>"
+EOS_TOKEN = "<eos>"
+PAD_TOKEN = "<pad>"
+UNK_TOKEN = "<unk>"
 
 
 class Generator(object):
@@ -26,6 +31,9 @@ class Generator(object):
         self._new_file = True
         self.logger = logger
 
+        self.end_index = self.vocab.stoi[EOS_TOKEN]
+        self.padding_index = self.vocab.stoi[PAD_TOKEN]
+
     def generate(self):
         """
         generate
@@ -43,23 +51,23 @@ class Generator(object):
         """
         iterate
         """
-        enc_inputs = inputs.post
-        dec_inputs = inputs.response[0][:, :-1], inputs.response[1] - 1
-        outputs = self.model.forward(enc_inputs, dec_inputs)
-        target = inputs.response[0][:, 1:]
-        # We need greedy search to obtain PPX
+        outputs = Pack()
+        # We need greedy search to obtain PPL
+        eval_outputs = self.model.forward(inputs, is_training=True)
+        logits = eval_outputs.logits
+        outputs.add(logits=logits)
 
-        outputs.add(logits=outputs.logits)
-        '''
         if self.beam_size == 1:
-            test_outputs = self.model.forward(inputs, evaluation=False)
+            test_outputs = self.model.forward(inputs, is_training=False)
             predictions = test_outputs.logits.argmax(dim=2)
             outputs.add(predictions=predictions)
         else:
             test_outputs = \
                 self.model.beam_search(inputs, self.beam_size, self.per_node_beam_size)
             outputs.add(predictions=test_outputs.predictions)
-        '''
+
+        response_token, response_len = inputs.response
+        target = response_token[:, 1:]
         metrics = self.collect_metrics(outputs, target)
         return metrics
 
@@ -71,12 +79,14 @@ class Generator(object):
         metrics = Pack(num_samples=num_samples)
 
         logits = outputs.logits
-        nll = self.model.nll_loss(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
-        ppx = math.exp(min(nll.item(), 100))
-        metrics.add(nll=nll, ppx=ppx)
+        nll = self.model.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
+        ppl = nll.exp()
+        metrics.add(nll=nll, ppl=ppl)
 
-        predictions = logits.argmax(2)
-        acc = accuracy(predictions, target, padding_idx=self.model.padding_index, end_idx=self.model.end_index)
+        predictions = outputs.predictions
+        acc = accuracy(predictions, target,
+                       padding_idx=self.padding_index,
+                       end_idx=self.end_index)
         predict_sentences = self.tensor2str(predictions)
 
         target_sentences = self.tensor2str(target)
@@ -100,7 +110,7 @@ class Generator(object):
             array = tensor[idx].tolist()
             token_list = []
             for token_id in array:
-                if token_id == self.model.end_index:
+                if token_id == self.end_index:
                     break
                 token_list.append(self.vocab.itos[token_id])
             sentences.append(' '.join(token_list))

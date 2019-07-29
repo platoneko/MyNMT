@@ -48,7 +48,7 @@ class StackGRUDecoder(nn.Module):
                 attn_mask=None,
                 num_steps=50,
                 teaching_force_rate=0.0,
-                early_stop=False):
+                is_training=True):
         """
         forward
 
@@ -78,9 +78,9 @@ class StackGRUDecoder(nn.Module):
         last_predictions = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
         step_logits = []
         for timestep in range(num_steps):
-            if early_stop and (last_predictions == self.end_index).all():
+            if not is_training and (last_predictions == self.end_index).all():
                 break
-            if self.training and torch.rand(1).item() < teaching_force_rate:
+            if is_training and torch.rand(1).item() < teaching_force_rate:
                 inputs = target[:, timestep]
             else:
                 inputs = last_predictions
@@ -116,8 +116,7 @@ class StackGRUDecoder(nn.Module):
                             attn_mask=None,
                             num_steps=50,
                             beam_size=4,
-                            per_node_beam_size=4,
-                            early_stop=False):
+                            per_node_beam_size=4):
         """
         Decoder forward using beam search at inference stage
 
@@ -157,7 +156,7 @@ class StackGRUDecoder(nn.Module):
             state['attn_value'] = attn_value
             state['attn_mask'] = attn_mask
         all_top_k_predictions, log_probabilities = \
-            beam_search.search(start_predictions, state, self._beam_step, early_stop=early_stop)
+            beam_search.search(start_predictions, state, self._beam_step, early_stop=True)
         return all_top_k_predictions, log_probabilities
 
     def _beam_step(self, inputs, state):
