@@ -23,6 +23,9 @@ class Seq2Seq(BaseModel):
             num_layers=2,
             dropout=0.2,
             teaching_force_rate=0.5,
+            mmi_anti=False,
+            anti_gamma=1,
+            anti_rate=0.5
     ):
         super().__init__()
         self.post_embedding = post_embedding
@@ -53,7 +56,10 @@ class Seq2Seq(BaseModel):
             attention=decoder_attn,
             dropout=dropout
         )
-        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index)
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='sum')
+        self.mmi_anti = mmi_anti
+        self.anti_gamma = anti_gamma
+        self.anti_rate = anti_rate
 
     def forward(self, inputs, is_training=True):
         """
@@ -111,14 +117,24 @@ class Seq2Seq(BaseModel):
         """
         num_samples = target.size(0)
         metrics = Pack(num_samples=num_samples)
-
+        loss = 0
         logits = outputs.logits
         nll = self.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
+        loss += nll
+        num_tokens = target.ne(self.padding_index).sum().item()
+        mean_nll = nll / num_tokens
         predictions = logits.argmax(dim=2)
         acc = accuracy(predictions, target, padding_idx=self.padding_index, end_idx=self.end_index)
-        metrics.add(nll=nll, acc=acc)
-        metrics.add(ppx=math.exp(nll.item()))
-        metrics.add(loss=nll)
+        metrics.add(nll=mean_nll, acc=acc)
+        metrics.add(ppx=math.exp(mean_nll.item()))
+        if self.mmi_anti:
+            gamma_logits = logits[:, :self.anti_gamma, :]
+            gamma_target = target[:, :self.anti_gamma]
+            loss -= self.anti_rate * \
+                    self.cross_entropy(gamma_logits.reshape(-1, logits.size(-1)),
+                                       gamma_target.reshape(-1))
+        loss = loss / num_tokens
+        metrics.add(loss=loss)
         return metrics
 
     def iterate(self, inputs, optimizer=None, grad_clip=None):

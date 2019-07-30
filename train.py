@@ -10,7 +10,6 @@ from torchtext.data import BucketIterator
 from torchtext.vocab import Vectors
 
 from models.seq2seq import Seq2Seq
-from models.baidu_seq2seq import BaiduSeq2Seq
 from utils.trainer import Trainer
 
 import pickle
@@ -44,6 +43,9 @@ def get_config():
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
     model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
+    model_arg.add_argument("--mmi_anti", type=bool, default=False)
+    model_arg.add_argument("--anti_gamma", type=int, default=1)
+    model_arg.add_argument("--anti_rate", type=float, default=0.5)
 
     # Training
     train_arg = parser.add_argument_group("Training")
@@ -127,7 +129,7 @@ def main():
             max_size=config.max_vocab_size,
             min_freq=config.min_freq)
 
-        os.mkdir(config.vocab_dir)
+        os.makedirs(config.vocab_dir)
         with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'wb') as vocab_file:
             pickle.dump(post_field.vocab, vocab_file)
         with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'wb') as vocab_file:
@@ -154,7 +156,6 @@ def main():
     # Model definition
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-
     assert config.model in ['Seq2Seq', 'Baidu']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
@@ -167,7 +168,10 @@ def main():
             padding_index=response_field.vocab.stoi[PAD_TOKEN],
             dropout=config.dropout,
             teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers
+            num_layers=config.num_layers,
+            mmi_anti=config.mmi_anti,
+            anti_gamma=config.anti_gamma,
+            anti_rate=config.anti_rate
         )
     else:
         model = BaiduSeq2Seq(

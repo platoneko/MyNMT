@@ -2,6 +2,7 @@ import torch
 from utils.metrics_manager import MetricsManager
 from utils.metrics import accuracy, bleu, distinct
 from utils.pack import Pack
+import math
 
 
 BOS_TOKEN = "<bos>"
@@ -79,9 +80,11 @@ class Generator(object):
         metrics = Pack(num_samples=num_samples)
 
         logits = outputs.logits
+        num_tokens = target.ne(self.padding_index).sum().item()
         nll = self.model.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
-        ppl = nll.exp()
-        metrics.add(nll=nll, ppl=ppl)
+        mean_nll = nll / num_tokens
+        ppx = math.exp(mean_nll.item())
+        metrics.add(nll=mean_nll, ppx=ppx)
 
         predictions = outputs.predictions
         acc = accuracy(predictions, target,

@@ -5,4 +5,5 @@ python ./test.py --data_path=./dataset/opensub_valid.tsv \
 --beam_size=1 \
 --model=Seq2Seq \
 --vocab_dir=./vocab \
---ckpt=./outputs/best.model
+--ckpt=./outputs/antianti/best.model \
+--save_dir=./results/antianti/

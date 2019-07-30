@@ -139,7 +139,7 @@ def main():
 
     # Save directory
     if not os.path.exists(config.save_dir):
-        os.mkdir(config.save_dir)
+        os.makedirs(config.save_dir)
     # Logger definition
     logger = logging.getLogger(__name__)
     logging.basicConfig(level=logging.DEBUG, format="%(message)s")
@@ -149,7 +149,8 @@ def main():
     # Generator definition
     if config.per_node_beam_size is None:
         config.per_node_beam_size = config.beam_size
-
+    if not os.path.exists(config.save_dir):
+        os.mkdir(config.save_dir)
     generator = Generator(
         model=model,
         data_iter=test_iter,
