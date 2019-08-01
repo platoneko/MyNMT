@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-python ./train.py --train_path=./dataset/opensub_valid.tsv \
+python ./train.py --train_path=./dataset/opensub_2m.tsv \
 --valid_path=./dataset/opensub_valid.tsv \
 --gpu=0 \
 --batch_size=10 \
 --log_steps=100 \
 --valid_step=1000 \
---min_freq=1 \
+--min_freq=5 \
 --max_vocab_size=50000 \
 --model=Seq2Seq \
 --save_dir=./outputs/antianti/ \

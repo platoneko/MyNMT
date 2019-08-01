@@ -9,3 +9,4 @@ outputs/*
 results/*
 *.pt
 *.zip
+*.model

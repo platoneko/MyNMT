@@ -40,3 +40,9 @@ class BaseModel(nn.Module):
             print("Loaded model state from '{}'".format(filename))
         else:
             print("Invalid model state file: '{}'".format(filename))
+
+    def collect_metrics(self):
+        raise NotImplementedError
+
+    def iterate(self):
+        raise NotImplementedError

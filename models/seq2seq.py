@@ -8,6 +8,7 @@ from utils.metrics import accuracy, perplexity
 from torch.nn.utils import clip_grad_norm_
 from modules.criterions import SequenceCrossEntropy
 import torch.nn as nn
+from overrides import overrides
 
 
 class Seq2Seq(BaseModel):
@@ -111,6 +112,7 @@ class Seq2Seq(BaseModel):
         outputs = Pack(predictions=predictions)
         return outputs
 
+    @overrides
     def collect_metrics(self, outputs, target):
         """
         collect_metrics
@@ -137,6 +139,7 @@ class Seq2Seq(BaseModel):
         metrics.add(loss=loss)
         return metrics
 
+    @overrides
     def iterate(self, inputs, optimizer=None, grad_clip=None):
         """
         iterate

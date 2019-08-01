@@ -4,12 +4,11 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
-from torchtext.data import Field, NestedField
+from torchtext.data import Field
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
-from torchtext.vocab import Vectors
 
-from models.seq2seq import Seq2Seq
+from models.embedding_ranker import EmbeddingRanker
 from utils.trainer import Trainer
 
 import pickle
@@ -32,20 +31,12 @@ def get_config():
     data_arg.add_argument("--train_path", type=str, required=True)
     data_arg.add_argument("--valid_path", type=str, required=True)
     data_arg.add_argument("--vocab_dir", type=str, default="./vocab")
-    data_arg.add_argument("--max_vocab_size", type=int, default=50000)
-    data_arg.add_argument("--min_freq", type=int, default=5)
+    data_arg.add_argument("--pretrained_vector", type=str, default="./ir_ranker/pretrained_vector.pt")
 
     # Model
     model_arg = parser.add_argument_group("Model")
-    model_arg.add_argument("--model", type=str, default='Seq2Seq')
     model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
-    model_arg.add_argument("--hidden_size", type=int, default=500)
-    model_arg.add_argument("--num_layers", type=int, default=2)
-    model_arg.add_argument("--dropout", type=float, default=0.2)
-    model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
-    model_arg.add_argument("--mmi_anti", type=bool, default=False)
-    model_arg.add_argument("--anti_gamma", type=int, default=1)
-    model_arg.add_argument("--anti_rate", type=float, default=0.5)
+    model_arg.add_argument("--margin", type=float, default=1.0)
 
     # Training
     train_arg = parser.add_argument_group("Training")
@@ -63,7 +54,7 @@ def get_config():
     misc_arg.add_argument("--valid_steps", type=int, default=800)
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str)
-    data_arg.add_argument("--save_dir", type=str, default="./outputs/")
+    data_arg.add_argument("--save_dir", type=str, default="./outputs/ranker")
 
     config = parser.parse_args()
 
@@ -89,16 +80,12 @@ def main():
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        include_lengths=True
     )
     response_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        init_token=BOS_TOKEN,
-        eos_token=EOS_TOKEN,
-        include_lengths=True
     )
 
     fields = {
@@ -118,28 +105,11 @@ def main():
         fields=fields
     )
 
-    if not os.path.exists(config.vocab_dir):
-        post_field.build_vocab(
-            train_data.post,
-            max_size=config.max_vocab_size,
-            min_freq=config.min_freq)
+    with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
+        post_field.vocab = pickle.load(vocab_file)
+    with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
+        response_field.vocab = pickle.load(vocab_file)
 
-        response_field.build_vocab(
-            train_data.response,
-            max_size=config.max_vocab_size,
-            min_freq=config.min_freq)
-
-        os.makedirs(config.vocab_dir)
-        with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'wb') as vocab_file:
-            pickle.dump(post_field.vocab, vocab_file)
-        with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'wb') as vocab_file:
-            pickle.dump(response_field.vocab, vocab_file)
-    else:
-        with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
-            post_field.vocab = pickle.load(vocab_file)
-        with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
-            response_field.vocab = pickle.load(vocab_file)
-    exit(0)
     train_iter = BucketIterator(
         train_data,
         batch_size=config.batch_size,
@@ -156,23 +126,12 @@ def main():
     # Model definition
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    assert config.model in ['Seq2Seq']
-    if config.model == 'Seq2Seq':
-        model = Seq2Seq(
-            post_embedding=post_embedding,
-            response_embedding=response_embedding,
-            embedding_size=config.embedding_size,
-            hidden_size=config.hidden_size,
-            start_index=response_field.vocab.stoi[BOS_TOKEN],
-            end_index=response_field.vocab.stoi[EOS_TOKEN],
-            padding_index=response_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers,
-            mmi_anti=config.mmi_anti,
-            anti_gamma=config.anti_gamma,
-            anti_rate=config.anti_rate
-        )
+    model = EmbeddingRanker(
+        config.embedding_size,
+        post_embedding,
+        response_embedding,
+        padding_idx=response_field.vocab.stoi[PAD_TOKEN],
+        margin=config.margin)
     model.to(device)
 
     # Optimizer definition
@@ -225,6 +184,8 @@ def main():
         save_summary=False)
     if config.ckpt is not None:
         trainer.load(file_prefix=config.ckpt)
+    else:
+        model.load(config.pretrained_vector)
     trainer.train()
     logger.info("Training done!")
 
