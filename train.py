@@ -4,12 +4,13 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
-from torchtext.data import Field, NestedField
+from torchtext.data import Field, LabelField
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 from torchtext.vocab import Vectors
 
 from models.seq2seq import Seq2Seq
+from models.profile_seq2seq import ProfileSeq2Seq
 from utils.trainer import Trainer
 
 import pickle
@@ -63,7 +64,8 @@ def get_config():
     misc_arg.add_argument("--valid_steps", type=int, default=800)
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str)
-    data_arg.add_argument("--save_dir", type=str, default="./outputs/")
+    misc_arg.add_argument("--save_dir", type=str, default="./outputs/")
+    misc_arg.add_argument("--pretrained", type=str, default="./pretrained.pt")
 
     config = parser.parse_args()
 
@@ -100,10 +102,12 @@ def main():
         eos_token=EOS_TOKEN,
         include_lengths=True
     )
+    speaker_field = LabelField()
 
     fields = {
         'post': ('post', post_field),
         'response': ('response', response_field),
+        'speaker': ('speaker', speaker_field)
     }
 
     train_data = TabularDataset(
@@ -134,12 +138,16 @@ def main():
             pickle.dump(post_field.vocab, vocab_file)
         with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'wb') as vocab_file:
             pickle.dump(response_field.vocab, vocab_file)
+        with open(os.path.join(config.vocab_dir, 'speaker_vocab.pkl'), 'wb') as vocab_file:
+            pickle.dump(speaker_field.vocab, vocab_file)
     else:
         with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
             post_field.vocab = pickle.load(vocab_file)
         with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
             response_field.vocab = pickle.load(vocab_file)
-    exit(0)
+        with open(os.path.join(config.vocab_dir, 'speaker_vocab.pkl'), 'rb') as vocab_file:
+            speaker_field.vocab = pickle.load(vocab_file)
+
     train_iter = BucketIterator(
         train_data,
         batch_size=config.batch_size,
@@ -156,11 +164,29 @@ def main():
     # Model definition
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    assert config.model in ['Seq2Seq']
+    assert config.model in ['Seq2Seq', 'Profile']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
+            embedding_size=config.embedding_size,
+            hidden_size=config.hidden_size,
+            start_index=response_field.vocab.stoi[BOS_TOKEN],
+            end_index=response_field.vocab.stoi[EOS_TOKEN],
+            padding_index=response_field.vocab.stoi[PAD_TOKEN],
+            dropout=config.dropout,
+            teaching_force_rate=config.teaching_force_rate,
+            num_layers=config.num_layers,
+            mmi_anti=config.mmi_anti,
+            anti_gamma=config.anti_gamma,
+            anti_rate=config.anti_rate
+        )
+    elif config.model == 'Profile':
+        profile_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
+        model = ProfileSeq2Seq(
+            post_embedding=post_embedding,
+            response_embedding=response_embedding,
+            profile_embedding=profile_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
             start_index=response_field.vocab.stoi[BOS_TOKEN],
@@ -225,6 +251,8 @@ def main():
         save_summary=False)
     if config.ckpt is not None:
         trainer.load(file_prefix=config.ckpt)
+    else:
+        model.load(config.pretrained)
     trainer.train()
     logger.info("Training done!")
 

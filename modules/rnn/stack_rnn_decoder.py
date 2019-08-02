@@ -62,8 +62,6 @@ class StackGRUDecoder(nn.Module):
         attn_mask : ``torch.LongTensor``, optional (default = None)
             A ``torch.LongTensor`` of shape (batch_size, num_rows)
         teaching_force_rate : ``float``, optional (default = 0.0)
-        early_stop : ``bool``, optional (default = False).
-            If every predicted token from the last step is `self.end_index`, then we can stop early.
 
         :return
         logits : ``torch.FloatTensor``
