@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-python ./train.py --train_path=./dataset/opensub_2m.tsv \
+python ./train.py --train_path=./dataset/opensub_2006k.tsv \
 --valid_path=./dataset/opensub_valid.tsv \
 --gpu=0 \
 --batch_size=10 \

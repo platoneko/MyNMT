@@ -8,7 +8,7 @@ import math
 
 class EmbeddingRanker(BaseModel):
     """
-    Supervised Embedding Models
+    Supervised Embedding Ranking Models
     """
     def __init__(self,
                  embedding_size,
@@ -23,7 +23,6 @@ class EmbeddingRanker(BaseModel):
         self.response_embedding = response_embedding
         self.padding_idx = padding_idx
         self.margin = margin
-        self.weight = nn.Pa
 
     def forward(self, inputs):
         embedded_post = self.post_embedding(inputs.post)

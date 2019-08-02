@@ -4,11 +4,11 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
-from torchtext.data import Field
+from torchtext.data import Field, LabelField
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
-from models.ranker import EmbeddingRanker
+from models.classifier import RNNClassifier
 from utils.trainer import Trainer
 
 import pickle
@@ -36,7 +36,7 @@ def get_config():
     # Model
     model_arg = parser.add_argument_group("Model")
     model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
-    model_arg.add_argument("--margin", type=float, default=1.0)
+    model_arg.add_argument("--kernel_size", type=int, default=3)
 
     # Training
     train_arg = parser.add_argument_group("Training")
@@ -54,7 +54,7 @@ def get_config():
     misc_arg.add_argument("--valid_steps", type=int, default=800)
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str)
-    data_arg.add_argument("--save_dir", type=str, default="./outputs/ranker")
+    data_arg.add_argument("--save_dir", type=str, default="./outputs/classifier")
 
     config = parser.parse_args()
 
@@ -75,22 +75,19 @@ def main():
     # Data definition
     tokenizer = lambda x: x.split()
 
-    post_field = Field(
-        sequential=True,
-        tokenize=tokenizer,
-        lower=True,
-        batch_first=True,
-    )
     response_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
+        include_lengths=True
     )
 
+    speaker_field = LabelField()
+
     fields = {
-        'post': ('post', post_field),
         'response': ('response', response_field),
+        'speaker': ('speaker', speaker_field)
     }
 
     train_data = TabularDataset(
@@ -105,10 +102,10 @@ def main():
         fields=fields
     )
 
-    with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
-        post_field.vocab = pickle.load(vocab_file)
     with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
         response_field.vocab = pickle.load(vocab_file)
+    with open(os.path.join(config.vocab_dir, 'speaker_vocab.pkl'), 'rb') as vocab_file:
+        speaker_field.vocab = pickle.load(vocab_file)
 
     train_iter = BucketIterator(
         train_data,
@@ -124,14 +121,12 @@ def main():
     )
 
     # Model definition
-    post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    model = EmbeddingRanker(
+    model = RNNClassifier(
         config.embedding_size,
-        post_embedding,
         response_embedding,
-        padding_idx=response_field.vocab.stoi[PAD_TOKEN],
-        margin=config.margin)
+        num_classes=len(speaker_field.vocab),
+        padding_idx=response_field.vocab.stoi[PAD_TOKEN])
     model.to(device)
 
     # Optimizer definition

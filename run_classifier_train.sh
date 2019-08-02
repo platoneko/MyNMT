@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-python ./ranker_train.py --train_path=./dataset/opensub_2004k.json \
+python ./classifier_train.py --train_path=./dataset/bigbang_train.json \
 --valid_path=./dataset/bigbang_valid.json \
 --vocab_dir=./vocab \
 --pretrained_vector=./pretrained.pt \
 --embedding_size=500 \
---margin=1.0 \
 --optimizer=Adam \
 --lr=0.001 \
 --num_epochs=20 \
@@ -14,4 +13,4 @@ python ./ranker_train.py --train_path=./dataset/opensub_2004k.json \
 --log_steps=100 \
 --valid_steps=1000 \
 --batch_size=32 \
---save_dir=./outputs/ranker_2004
+--save_dir=./outputs/classifier

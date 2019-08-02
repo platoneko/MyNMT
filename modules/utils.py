@@ -36,13 +36,36 @@ def masked_softmax(vector, mask, dim=-1,
     result : ``torch.FloatTensor``
         A ``torch.FloatTensor`` of shape (B, *, N)
     """
-    mask = mask.float()
     masked_vector = vector.masked_fill((1 - mask).byte(), mask_fill_value)
     result = torch.nn.functional.softmax(masked_vector, dim=dim)
     return result
 
 
-def masked_sum(vector, mask, dim, keepdim=False, eps=1e-8):
+def masked_max(vector, mask, dim, keepdim=False, mask_fill_value=-1e32):
+    """
+    To calculate max along certain dimensions on masked values
+
+    :param
+    vector : ``torch.Tensor``
+        The vector to calculate max.
+    mask : ``torch.Tensor``
+        The mask of the vector. It must be broadcastable with vector.
+    dim : ``int``
+        The dimension to calculate mean
+    keepdim : ``bool``
+        Whether to keep dimension
+
+
+    :return
+    A ``torch.Tensor`` of including the max values.
+    """
+    one_minus_mask = (1.0 - mask).byte()
+    replaced_vector = vector.masked_fill(one_minus_mask, mask_fill_value)
+    value_sum, _ = torch.max(replaced_vector, dim=dim, keepdim=keepdim)
+    return value_sum
+
+
+def masked_sum(vector, mask, dim, keepdim=False):
     """
     To calculate sum along certain dimensions on masked values
 
@@ -55,11 +78,9 @@ def masked_sum(vector, mask, dim, keepdim=False, eps=1e-8):
         The dimension to calculate mean
     keepdim : ``bool``
         Whether to keep dimension
-    eps : ``float``
-        A small value to avoid zero division problem.
 
     :return
-    A ``torch.Tensor`` of including the mean values.
+    A ``torch.Tensor`` of including the sum values.
     """
     one_minus_mask = (1.0 - mask).byte()
     replaced_vector = vector.masked_fill(one_minus_mask, 0.0)
