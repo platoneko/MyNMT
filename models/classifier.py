@@ -1,12 +1,12 @@
 from models.base_model import BaseModel
-from modules.rnn import GRUEncoder
-from modules.utils import *
+from modules.criterions import FocalLoss
 from utils.pack import Pack
 from overrides import overrides
 
 import torch
 from torch.nn.utils import clip_grad_norm_
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class ConvClassifier(BaseModel):
@@ -16,6 +16,7 @@ class ConvClassifier(BaseModel):
     def __init__(self,
                  embedding_size,
                  response_embedding,
+                 kernel_size,
                  num_classes,
                  padding_idx,
                  ):
@@ -26,27 +27,23 @@ class ConvClassifier(BaseModel):
         self.num_classes = num_classes
 
         self.conv_layer = nn.Sequential(
-            nn.Conv1d(embedding_size, 500, 3),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2)
+            nn.Conv1d(embedding_size, embedding_size, kernel_size),
+            nn.ReLU(),
         )
 
-        # self.rnn = GRUEncoder(embedding_size, embedding_size//2, bidirectional=True)
         self.output_layer = nn.Sequential(
             nn.Dropout(0.2),
             nn.Linear(embedding_size, num_classes),
             nn.Softmax(dim=-1))
-        self.nll_loss = nn.NLLLoss()
+        self.focal_loss = FocalLoss(reduce=True)
 
-    def forward(self, inputs):
-        response, lengths = inputs.response
-        embedded_response = self.response_embedding(response)
-        response_mask = response.ne(self.padding_idx)
-        masked_vector = embedded_response.masked_fill((1 - response_mask.unsqueeze(2)).byte(), 0.0)
-        # response_vectors = masked_max(embedded_response, response_mask.unsqueeze(2), 1)
-        # shape: (batch_size, embedding_size)
-        response_vectors, _ = self.conv_layer(masked_vector.transpose(1, 2)).max(2)
-        # _, response_vectors = self.rnn((embedded_response, lengths))
+    def forward(self, inputs, mask=None):
+        embedded_inputs = self.response_embedding(inputs)
+        if mask is None:
+            mask = inputs.ne(self.padding_idx)
+        masked_vector = embedded_inputs.masked_fill((1 - mask.unsqueeze(2)).byte(), 0.0)
+        internal = self.conv_layer(masked_vector.transpose(1, 2))
+        response_vectors = F.max_pool1d(internal, internal.size(2)).squeeze(2)
         # shape: (batch_size, batch_size)
         probabilities = self.output_layer(response_vectors)
         outputs = Pack(probabilities=probabilities, vectors=response_vectors)
@@ -59,7 +56,7 @@ class ConvClassifier(BaseModel):
         """
         num_samples = probabilities.size(0)
         metrics = Pack(num_samples=num_samples)
-        loss = self.nll_loss(torch.log(probabilities), speaker)
+        loss = self.focal_loss(torch.log(probabilities), speaker)
         acc = (probabilities.argmax(1) == speaker).sum().float() / num_samples
         metrics.add(loss=loss, acc=acc)
         return metrics
@@ -69,11 +66,16 @@ class ConvClassifier(BaseModel):
         """
         iterate
         """
-        outputs = self.forward(inputs)
+        if isinstance(inputs.response, tuple):
+            response, _ = inputs.response
+        else:
+            response = inputs.response
+        outputs = self.forward(response)
         metrics = self.collect_metrics(outputs.probabilities, inputs.speaker)
 
         loss = metrics.loss
         if torch.isnan(loss):
+            print(outputs.probabilities, outputs.vectors, self.conv_layer[0].weight.data)
             raise ValueError("nan loss encountered")
 
         if self.training:

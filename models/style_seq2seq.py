@@ -1,4 +1,5 @@
 from modules.rnn import GRUEncoder
+from modules.memory_network import MemoryNetwork
 from modules.attention import MLPAttention
 from modules.beam_search import BeamSearch
 from modules.utils import *
@@ -13,7 +14,15 @@ from torch.nn.utils import clip_grad_norm_
 from overrides import overrides
 
 
-class ProfileSeq2Seq(BaseModel):
+def get_sentence_length(tokens, end_index):
+    # `tokens` of shape: (batch_size, num_steps)
+    batch_size, num_steps = tokens.size()
+    tokens = torch.cat([tokens, tokens.new_full((batch_size, 1), fill_value=end_index)], dim=1)
+    lengths = -((tokens == end_index).flip(1)).argmax(dim=1) + num_steps
+    return lengths
+
+
+class StyleSeq2Seq(BaseModel):
     def __init__(
             self,
             post_embedding,
@@ -24,12 +33,14 @@ class ProfileSeq2Seq(BaseModel):
             start_index,
             end_index,
             padding_index,
+            ir,
             num_layers=2,
             dropout=0.2,
             teaching_force_rate=0.5,
-            mmi_anti=False,
-            anti_gamma=1,
-            anti_rate=0.5
+            num_hops=2,
+            topk=20,
+            reinforce=True,
+            reinforce_rate=0.5
     ):
         super().__init__()
         self.post_embedding = post_embedding
@@ -43,29 +54,38 @@ class ProfileSeq2Seq(BaseModel):
         self.dropout = dropout
         self.teaching_force_rate = teaching_force_rate
         self.num_layers = num_layers
+        self.topk = topk
 
-        self.encoder = GRUEncoder(embedding_size, hidden_size//2,
+        self.encoder = GRUEncoder(embedding_size, embedding_size//2,
                                   dropout=dropout, num_layers=num_layers, bidirectional=True)
 
-        decoder_attn = MLPAttention(hidden_size, hidden_size, hidden_size)
-        decoder_input_size = embedding_size + hidden_size + embedding_size
+        context_attn = MLPAttention(hidden_size, embedding_size, hidden_size)
+        style_attn = MLPAttention(hidden_size, embedding_size, hidden_size)
+
         vocab_size = response_embedding.weight.size(0)
-        self.decoder = ProfileDecoder(
-            decoder_input_size,
-            hidden_size,
-            vocab_size,
-            start_index,
-            end_index,
-            response_embedding,
-            profile_embedding,
+        self.num_hops = num_hops
+        self.memory_net = MemoryNetwork(num_hops, vocab_size, embedding_size, padding_index)
+
+        decoder_input_size = embedding_size * 4
+        self.decoder = StyleDecoder(
+            input_size=decoder_input_size,
+            hidden_size=hidden_size,
+            embedding_size=embedding_size,
+            vocab_size=vocab_size,
+            start_index=start_index,
+            end_index=end_index,
+            text_embedding=response_embedding,
+            profile_embedding=profile_embedding,
+            context_attn=context_attn,
+            style_attn=style_attn,
             num_layers=num_layers,
-            attention=decoder_attn,
             dropout=dropout
         )
-        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='sum')
-        self.mmi_anti = mmi_anti
-        self.anti_gamma = anti_gamma
-        self.anti_rate = anti_rate
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index)
+        self.reinforce = reinforce
+        self.reinforce_rate = reinforce_rate
+
+        self.ir = ir
 
     def forward(self, inputs, is_training=True):
         """
@@ -80,10 +100,22 @@ class ProfileSeq2Seq(BaseModel):
         embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
         encoder_outputs_mask = post_token.ne(self.padding_index)
+
+        # shape: (batch_size, k, length)
+        if is_training:
+            candidate = self.ir.get_candidate(inputs.candidate)
+        else:
+            candidate = self.ir.search_candidate(post_token, self.topk, post_mask=encoder_outputs_mask)
+        # shape: (batch_size, embedding_size)
+        candidate_memory = self.memory_net(encoder_hidden[-1], candidate)
+        # shape: (batch_size, k, embedding_size)
+        style_memory = self.ir.get_style(inputs.speaker, self.topk)
         if is_training:
             logits = self.decoder(
                 encoder_hidden,
                 inputs.speaker,
+                candidate_memory,
+                style_memory,
                 target=response_token,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
@@ -95,6 +127,8 @@ class ProfileSeq2Seq(BaseModel):
             logits = self.decoder(
                 encoder_hidden,
                 inputs.speaker,
+                candidate_memory,
+                style_memory,
                 target=None,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
@@ -109,10 +143,17 @@ class ProfileSeq2Seq(BaseModel):
         embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
         encoder_outputs_mask = post_token.ne(self.padding_index)
+
+        candidate = self.ir.search_candidate(post_token, self.topk, encoder_outputs_mask)
+        candidate_memory = self.memory_net(encoder_hidden[-1], candidate)
+        style_memory = self.ir.get_style(inputs.speaker, self.topk)
+
         all_top_k_predictions, log_probabilities = \
             self.decoder.forward_beam_search(
                 encoder_hidden,
                 inputs.speaker,
+                candidate_memory,
+                style_memory,
                 attn_value=encoder_outputs,
                 attn_mask=encoder_outputs_mask,
                 beam_size=beam_size,
@@ -122,7 +163,7 @@ class ProfileSeq2Seq(BaseModel):
         return outputs
 
     @overrides
-    def collect_metrics(self, outputs, target):
+    def collect_metrics(self, outputs, target, speaker=None):
         """
         collect_metrics
         """
@@ -132,19 +173,29 @@ class ProfileSeq2Seq(BaseModel):
         logits = outputs.logits
         nll = self.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
         loss += nll
-        num_tokens = target.ne(self.padding_index).sum().item()
-        mean_nll = nll / num_tokens
         predictions = logits.argmax(dim=2)
         acc = accuracy(predictions, target, padding_idx=self.padding_index, end_idx=self.end_index)
-        metrics.add(nll=mean_nll, acc=acc)
-        metrics.add(ppx=math.exp(mean_nll.item()))
-        if self.mmi_anti:
-            gamma_logits = logits[:, :self.anti_gamma, :]
-            gamma_target = target[:, :self.anti_gamma]
-            loss -= self.anti_rate * \
-                    self.cross_entropy(gamma_logits.reshape(-1, logits.size(-1)),
-                                       gamma_target.reshape(-1))
-        loss = loss / num_tokens
+        metrics.add(nll=nll, acc=acc)
+        metrics.add(ppx=math.exp(nll.item()))
+
+        if self.reinforce:
+            predict_length = get_sentence_length(predictions, self.end_index)
+            predict_mask = get_sequence_mask(predict_length, predictions.size(1))
+            predict_score = self.ir.get_style_score(predictions, predict_mask, speaker)
+            target_mask = target.ne(self.padding_index) & target.ne(self.end_index)
+            target_score = self.ir.get_style_score(target, target_mask, speaker)
+            # shape: (batch_size,)
+            reward = predict_score - target_score
+            # shape: (batch_size * length)
+            distribution = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
+                                           predictions.reshape(-1),
+                                           reduction='none')
+            loss -= distribution.view(num_samples, -1) * \
+                predict_mask.float() * \
+                reward.unsqueeze(1) * \
+                self.reinforce_rate
+            metrics.add(reward=reward.mean())
+
         metrics.add(loss=loss)
         return metrics
 
@@ -156,7 +207,7 @@ class ProfileSeq2Seq(BaseModel):
         outputs = self.forward(inputs, is_training=True)
         response_token, response_len = inputs.response
         target = response_token[:, 1:]
-        metrics = self.collect_metrics(outputs, target)
+        metrics = self.collect_metrics(outputs, target, inputs.speaker)
 
         loss = metrics.loss
         if torch.isnan(loss):
@@ -173,19 +224,21 @@ class ProfileSeq2Seq(BaseModel):
         return metrics
 
 
-class ProfileDecoder(nn.Module):
+class StyleDecoder(nn.Module):
 
     def __init__(
             self,
             input_size,
             hidden_size,
+            embedding_size,
             vocab_size,
             start_index,
             end_index,
             text_embedding,
             profile_embedding,
+            context_attn,
+            style_attn,
             num_layers=2,
-            attention=None,
             dropout=0.0
     ):
         super().__init__()
@@ -197,7 +250,8 @@ class ProfileDecoder(nn.Module):
         self.end_index = end_index
         self.text_embedding = text_embedding
         self.profile_embedding = profile_embedding
-        self.attention = attention
+        self.context_attn = context_attn
+        self.style_attn = style_attn
         self.dropout = dropout
         self.num_layers = num_layers
 
@@ -207,15 +261,14 @@ class ProfileDecoder(nn.Module):
                           batch_first=True,
                           dropout=dropout if self.num_layers > 1 else 0)
 
-        self.output_layer = nn.Sequential(
-            nn.Dropout(p=self.dropout),
-            nn.Linear(self.hidden_size, self.vocab_size)
-        )
+        self.output_layer = StyleAwareBias(embedding_size, hidden_size, vocab_size, dropout)
 
     def forward(
             self,
             hidden,
             profile,
+            candidate_memory,
+            style_memory,
             target=None,
             attn_value=None,
             attn_mask=None,
@@ -231,6 +284,10 @@ class ProfileDecoder(nn.Module):
             Initial hidden tensor of shape (num_layers, batch_size, hidden_size)
         profile : ``torch.LongTensor``, required.
             Speaker tokens tensor of shape (batch_size,)
+        candidate_memory : ``torch.FloatTensor``, required.
+            Tensor of shape (batch_size, k, embedding_size)
+        style_memory : ``torch.FloatTensor``, required.
+            Tensor of shape (batch_size, k, embedding_size)
         target : ``torch.LongTensor``, optional (default = None)
             Target tokens tensor of shape (batch_size, length)
         attn_value : ``torch.FloatTensor``, optional (default = None)
@@ -260,7 +317,10 @@ class ProfileDecoder(nn.Module):
             else:
                 inputs = last_predictions
             # `outputs` of shape (batch_size, vocab_size)
-            outputs, hidden = self._take_step(inputs, hidden, embedded_profile, attn_value, attn_mask)
+            outputs, hidden = self._take_step(
+                inputs, hidden, embedded_profile,
+                candidate_memory, style_memory,
+                attn_value, attn_mask)
             # shape: (batch_size,)
             last_predictions = torch.argmax(outputs, dim=-1)
             step_logits.append(outputs.unsqueeze(1))
@@ -268,40 +328,54 @@ class ProfileDecoder(nn.Module):
         logits = torch.cat(step_logits, dim=1)
         return logits
 
-    def _take_step(self, inputs, hidden, profile, attn_value=None, attn_mask=None):
+    def _take_step(
+            self,
+            inputs,
+            hidden,
+            profile,
+            candidate_memory,
+            style_memory,
+            attn_value=None,
+            attn_mask=None
+    ):
         # `inputs` of shape: (batch_size,)
         # `hidden` of shape: (num_layers, batch_size, hidden_size)
         # shape: (batch_size, input_size)
         embedded_inputs = self.text_embedding(inputs)
-        rnn_inputs = embedded_inputs
-        if self.attention is not None:
-            # shape: (batch_size, num_rows)
-            attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
-            # shape: (batch_size, input_size + attn_size)
-            rnn_inputs = torch.cat([rnn_inputs, attn_inputs], dim=-1)
-        rnn_inputs = torch.cat([rnn_inputs, profile], dim=-1)
+        # shape: (batch_size, num_rows)
+        context_score = self.context_attn(hidden[-1], attn_value, attn_mask)
+        context_inputs = context_score.unsqueeze(1).matmul(attn_value).squeeze(1)
+        rnn_inputs = torch.cat([embedded_inputs, context_inputs, profile, candidate_memory], dim=-1)
         _, next_hidden = self.rnn(rnn_inputs.unsqueeze(1), hidden)
+
+        style_score = self.context_attn(hidden[-1], style_memory)
+        style_inputs = style_score.unsqueeze(1).matmul(style_memory).squeeze(1)
         # shape: (batch_size, vocab_size)
-        outputs = self.output_layer(next_hidden[-1])
+        outputs = self.output_layer(next_hidden[-1], style_inputs)
         return outputs, next_hidden
 
-    def forward_beam_search(
-            self,
-            hidden,
-            profile,
-            attn_value=None,
-            attn_mask=None,
-            num_steps=50,
-            beam_size=4,
-            per_node_beam_size=4
-    ):
+    def forward_beam_search(self,
+                            hidden,
+                            profile,
+                            candidate_memory,
+                            style_memory,
+                            attn_value=None,
+                            attn_mask=None,
+                            num_steps=50,
+                            beam_size=4,
+                            per_node_beam_size=4):
         """
         Decoder forward using beam search at inference stage
 
         :param
         hidden : ``torch.FloatTensor``, required.
             Initial hidden tensor of shape (num_layers, batch_size, hidden_size)
+        profile : ``torch.LongTensor``, required.
+            Speaker tokens tensor of shape (batch_size,)
+        candidate_memory : ``torch.FloatTensor``, required.
+            Tensor of shape (batch_size, k, embedding_size)
+        style_memory : ``torch.FloatTensor``, required.
+            Tensor of shape (batch_size, k, embedding_size)
         end_index : ``int``, required.
             Vocab index of <eos> token.
         attn_value : ``torch.FloatTensor``, optional (default = None)
@@ -330,10 +404,12 @@ class ProfileDecoder(nn.Module):
         embedded_profile = self.profile_embedding(profile)
         # `hidden` of shape: (batch_size, num_layers, hidden_size)
         hidden = hidden.transpose(0, 1).contiguous()
-        state = {'hidden': hidden, 'profile': embedded_profile}
-        if self.attention:
-            state['attn_value'] = attn_value
-            state['attn_mask'] = attn_mask
+        state = {'hidden': hidden,
+                 'profile': embedded_profile,
+                 'attn_value': attn_value,
+                 'attn_mask': attn_mask,
+                 'candidate_memory': candidate_memory,
+                 'style_memory': style_memory}
         all_top_k_predictions, log_probabilities = \
             beam_search.search(start_predictions, state, self._beam_step, early_stop=True)
         return all_top_k_predictions, log_probabilities
@@ -341,23 +417,101 @@ class ProfileDecoder(nn.Module):
     def _beam_step(self, inputs, state):
         # shape: (group_size, input_size)
         embedded_inputs = self.text_embedding(inputs)
-        rnn_inputs = embedded_inputs
         profile = state['profile']
         # shape: (group_size, num_layers, input_size)
         hidden = state['hidden']
         # shape: (num_layers, group_size, input_size)
         hidden = hidden.transpose(0, 1).contiguous()
-        if self.attention is not None:
-            attn_value = state['attn_value']
-            attn_mask = state['attn_mask']
-            # shape: (group_size, num_rows)
-            attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
-            # shape: (group_size, input_size + attn_size)
-            rnn_inputs = torch.cat([rnn_inputs, attn_inputs], dim=-1)
-        rnn_inputs = torch.cat([rnn_inputs, profile], dim=-1)
+        attn_value = state['attn_value']
+        attn_mask = state['attn_mask']
+        # shape: (group_size, num_rows)
+        context_score = self.context_attn(hidden[-1], attn_value, attn_mask)
+        context_inputs = torch.sum(context_score.unsqueeze(2) * attn_value, dim=1)
+        candidate_memory = state['candidate_memory']
+        # shape: (group_size, rnn_input_size)
+        rnn_inputs = torch.cat([embedded_inputs, context_inputs, profile, candidate_memory], dim=-1)
         _, next_hidden = self.rnn(rnn_inputs.unsqueeze(1), hidden)
         state['hidden'] = next_hidden.transpose(0, 1).contiguous()
+
+        style_memory = state['style_memory']
+        style_score = self.context_attn(hidden[-1], style_memory)
+        style_inputs = torch.sum(style_score.unsqueeze(2) * style_memory, dim=1)
         # shape: (group_size, vocab_size)
-        log_prob = F.log_softmax(self.output_layer(next_hidden[-1]), dim=-1)
+        log_prob = F.log_softmax(self.output_layer(next_hidden[-1], style_inputs), dim=-1)
         return log_prob, state
+
+
+class StyleAwareBias(nn.Module):
+    def __init__(self,
+                 embedding_size,
+                 state_size,
+                 vocab_size,
+                 dropout=0.0):
+        super().__init__()
+        self.linear_i = nn.Linear(embedding_size, vocab_size, bias=False)
+        self.linear_s = nn.Linear(state_size, vocab_size, bias=False)
+        self.out_bias = nn.Parameter(torch.zeros(vocab_size))
+        self.linear_o = nn.Linear(state_size, 1, bias=False)
+        self.dropout = dropout
+
+    def forward(self, state, inputs):
+        # shape: (batch_size, 1)
+        a_t = F.sigmoid(self.linear_o(state))
+        outputs = (1 - a_t) * F.dropout(self.linear_i(inputs), p=self.dropout) + \
+                  a_t * F.dropout(self.linear_s(state), p=self.dropout) + self.out_bias
+        # shape: (batch_size, num_classes)
+        return outputs
+
+
+class InfoRetriever(object):
+
+    def __init__(
+            self,
+            candidate_lib, style_lib,
+            candidate_vectors=None,
+            ranker_embedding=None,
+            classifier=None
+    ):
+        # shape: (num_candidate, length)
+        self.candidate_lib = candidate_lib
+        # shape: (num_style, K, embedding_size)
+        self.style_lib = style_lib
+        # shape: (embedding_size, num_candidate)
+        self.candidate_vectors = candidate_vectors
+        self.ranker_embedding = ranker_embedding
+        self.classifier = classifier.eval()
+
+    def get_candidate(self, candidate_indices):
+        # `candidate_indices` of shape (batch_size, k)
+        batch_size, k = candidate_indices.size()
+        candidate = torch.index_select(self.candidate_lib, 0, candidate_indices.view(-1))
+        candidate = candidate.view(batch_size, k, -1)
+        return candidate
+
+    def search_candidate(self, post_token, topk, post_mask=None):
+        # `post_token` of shape: (batch_size, length)
+        # `post_mask` of shape: (batch_size, length)
+        embedded_post = self.ranker_embedding(post_token)
+        # shape: (batch_size, embedding_size)
+        if post_mask is not None:
+            post_vectors = masked_sum(embedded_post, post_mask.unsqueeze(2), 1)
+        else:
+            post_vectors = torch.sum(embedded_post, 1)
+        # shape: (batch_size, num_candidate)
+        rank_score = post_vectors.matmul(self.candidate_vectors)
+        # shape: (batch_size, k)
+        _, topk_indices = rank_score.topk(topk, 1)
+        candidate = self.get_candidate(topk_indices)
+        return candidate
+
+    def get_style(self, indices, topk):
+        # `indices` of shape (batch_size,)
+        topk = min(self.style_lib.size(1), topk)
+        return self.style_lib.index_select(0, indices)[:, :topk, :]
+
+    def get_style_score(self, inputs, speaker, mask):
+        # `inputs` of shape: (batch_size, length)
+        with torch.no_grad():
+            outputs = self.classifier(inputs, mask)
+        style_score = outputs.probabilities[torch.arange(0, speaker.size(0)), speaker]
+        return style_score

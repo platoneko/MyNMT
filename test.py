@@ -4,11 +4,12 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
-from torchtext.data import Field, NestedField
+from torchtext.data import Field, LabelField
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
+from models.profile_seq2seq import ProfileSeq2Seq
 from utils.generator import Generator
 
 import pickle
@@ -75,8 +76,6 @@ def main():
     post_field = Field(
         sequential=True,
         tokenize=tokenizer,
-        unk_token=UNK_TOKEN,
-        pad_token=PAD_TOKEN,
         lower=True,
         batch_first=True,
         include_lengths=True
@@ -86,28 +85,30 @@ def main():
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        unk_token=UNK_TOKEN,
-        pad_token=PAD_TOKEN,
         init_token=BOS_TOKEN,
         eos_token=EOS_TOKEN,
         include_lengths=True
     )
+    speaker_field = LabelField()
 
     fields = {
         'post': ('post', post_field),
         'response': ('response', response_field),
+        'speaker': ('speaker', speaker_field)
     }
 
     test_data = TabularDataset(
         path=config.data_path,
-        format='tsv',
+        format='json',
         fields=fields
     )
 
-    with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
-        post_field.vocab = pickle.load(vocab_file)
-    with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
-        response_field.vocab = pickle.load(vocab_file)
+    with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'rb') as post_vocab:
+        post_field.vocab = pickle.load(post_vocab)
+    with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as response_vocab:
+        response_field.vocab = pickle.load(response_vocab)
+    with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as speaker_vocab:
+        speaker_field.vocab = pickle.load(speaker_vocab)
 
     test_iter = BucketIterator(
         test_data,
@@ -120,11 +121,26 @@ def main():
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
 
-    assert config.model in ['Seq2Seq']
+    assert config.model in ['Seq2Seq', 'Profile']
     if config.model == 'Seq2Seq':
         model = Seq2Seq(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
+            embedding_size=config.embedding_size,
+            hidden_size=config.hidden_size,
+            start_index=response_field.vocab.stoi[BOS_TOKEN],
+            end_index=response_field.vocab.stoi[EOS_TOKEN],
+            padding_index=response_field.vocab.stoi[PAD_TOKEN],
+            dropout=config.dropout,
+            teaching_force_rate=0.0,
+            num_layers=config.num_layers,
+        )
+    elif config.model == 'Profile':
+        profile_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
+        model = ProfileSeq2Seq(
+            post_embedding=post_embedding,
+            response_embedding=response_embedding,
+            profile_embedding=profile_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
             start_index=response_field.vocab.stoi[BOS_TOKEN],
@@ -154,7 +170,9 @@ def main():
     generator = Generator(
         model=model,
         data_iter=test_iter,
-        vocab=response_field.vocab,
+        post_vocab=post_field.vocab,
+        response_vocab=response_field.vocab,
+        speaker_vocab=speaker_field.vocab,
         logger=logger,
         beam_size=config.beam_size,
         per_node_beam_size=config.per_node_beam_size,

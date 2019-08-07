@@ -11,7 +11,7 @@ class StackGRUDecoder(nn.Module):
     def __init__(self,
                  input_size,
                  hidden_size,
-                 num_classes,
+                 vocab_size,
                  start_index,
                  end_index,
                  embedding,
@@ -22,7 +22,7 @@ class StackGRUDecoder(nn.Module):
 
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.num_classes = num_classes
+        self.vocab_size = vocab_size
         self.start_index = start_index
         self.end_index = end_index
         self.embedding = embedding
@@ -38,7 +38,7 @@ class StackGRUDecoder(nn.Module):
 
         self.output_layer = nn.Sequential(
             nn.Dropout(p=self.dropout),
-            nn.Linear(self.hidden_size, self.num_classes)
+            nn.Linear(self.hidden_size, self.vocab_size)
         )
 
     def forward(self,
@@ -65,7 +65,7 @@ class StackGRUDecoder(nn.Module):
 
         :return
         logits : ``torch.FloatTensor``
-            A ``torch.FloatTensor`` of shape (batch_size, num_steps, num_classes)
+            A ``torch.FloatTensor`` of shape (batch_size, num_steps, vocab_size)
         """
         if self.attention is not None:
             assert attn_value is not None
@@ -82,7 +82,7 @@ class StackGRUDecoder(nn.Module):
                 inputs = target[:, timestep]
             else:
                 inputs = last_predictions
-            # `outputs` of shape (batch_size, num_classes)
+            # `outputs` of shape (batch_size, vocab_size)
             outputs, hidden = self._take_step(inputs, hidden, attn_value, attn_mask)
             # shape: (batch_size,)
             last_predictions = torch.argmax(outputs, dim=-1)
@@ -100,11 +100,11 @@ class StackGRUDecoder(nn.Module):
         if self.attention is not None:
             # shape: (batch_size, num_rows)
             attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
+            attn_inputs = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
             # shape: (batch_size, input_size + attn_size)
             rnn_inputs = torch.cat([embedded_inputs, attn_inputs], dim=-1)
         _, next_hidden = self.rnn(rnn_inputs.unsqueeze(1), hidden)
-        # shape: (batch_size, num_classes)
+        # shape: (batch_size, vocab_size)
         outputs = self.output_layer(next_hidden[-1])
         return outputs, next_hidden
 
@@ -171,12 +171,12 @@ class StackGRUDecoder(nn.Module):
             attn_mask = state['attn_mask']
             # shape: (group_size, num_rows)
             attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
+            attn_inputs = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
             # shape: (group_size, input_size + attn_size)
             rnn_inputs = torch.cat([embedded_inputs, attn_inputs], dim=-1)
         _, next_hidden = self.rnn(rnn_inputs.unsqueeze(1), hidden)
         state['hidden'] = next_hidden.transpose(0, 1).contiguous()
-        # shape: (group_size, num_classes)
+        # shape: (group_size, vocab_size)
         log_prob = F.log_softmax(self.output_layer(next_hidden[-1]), dim=-1)
         return log_prob, state
 
@@ -188,7 +188,7 @@ class StackLSTMDecoder(nn.Module):
     def __init__(self,
                  input_size,
                  hidden_size,
-                 num_classes,
+                 vocab_size,
                  start_index,
                  end_index,
                  embedding,
@@ -199,7 +199,7 @@ class StackLSTMDecoder(nn.Module):
 
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.num_classes = num_classes
+        self.vocab_size = vocab_size
         self.start_index = start_index
         self.end_index = end_index
         self.embedding = embedding
@@ -215,7 +215,7 @@ class StackLSTMDecoder(nn.Module):
 
         self.output_layer = nn.Sequential(
             nn.Dropout(p=self.dropout),
-            nn.Linear(self.hidden_size, self.num_classes),
+            nn.Linear(self.hidden_size, self.vocab_size),
         )
 
     def forward(self,
@@ -244,7 +244,7 @@ class StackLSTMDecoder(nn.Module):
 
         :return
         logits : ``torch.FloatTensor``
-            A ``torch.FloatTensor`` of shape (batch_size, num_steps, num_classes)
+            A ``torch.FloatTensor`` of shape (batch_size, num_steps, vocab_size)
         """
         if self.attention is not None:
             assert attn_value is not None
@@ -264,7 +264,7 @@ class StackLSTMDecoder(nn.Module):
                 inputs = target[:, timestep]
             else:
                 inputs = last_predictions
-            # `outputs` of shape (batch_size, num_classes)
+            # `outputs` of shape (batch_size, vocab_size)
             outputs, hidden_tuple = self._take_step(inputs, hidden_tuple, attn_value, attn_mask)
             # shape: (batch_size,)
             last_predictions = torch.argmax(outputs, dim=-1)
@@ -282,11 +282,11 @@ class StackLSTMDecoder(nn.Module):
         if self.attention is not None:
             # shape: (batch_size, num_rows)
             attn_score = self.attention(hidden_tuple[0][-1], attn_value, attn_mask)
-            attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
+            attn_inputs = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
             # shape: (batch_size, input_size + attn_size)
             rnn_inputs = torch.cat([embedded_inputs, attn_inputs], dim=-1)
         _, (next_hidden, next_cell_state) = self.rnn(rnn_inputs.unsqueeze(1), hidden_tuple)
-        # shape: (batch_size, num_classes)
+        # shape: (batch_size, vocab_size)
         outputs = self.output_layer(next_hidden[-1])
         return outputs, (next_hidden, next_cell_state)
 
@@ -357,12 +357,12 @@ class StackLSTMDecoder(nn.Module):
             attn_mask = state['attn_mask']
             # shape: (group_size, num_rows)
             attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
+            attn_inputs = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
             # shape: (group_size, input_size + attn_size)
             rnn_inputs = torch.cat([embedded_inputs, attn_inputs], dim=-1)
         _, (next_hidden, next_cell_state) = self.rnn(rnn_inputs.unsqueeze(1), (hidden, cell_state))
         state['hidden'] = next_hidden.transpose(0, 1).contiguous()
         state['cell_state'] = next_cell_state.transpose(0, 1).contiguous()
-        # shape: (group_size, num_classes)
+        # shape: (group_size, vocab_size)
         log_prob = F.log_softmax(self.output_layer(next_hidden[-1]), dim=-1)
         return log_prob, state

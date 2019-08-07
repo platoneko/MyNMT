@@ -65,7 +65,7 @@ def get_config():
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str)
     misc_arg.add_argument("--save_dir", type=str, default="./outputs/")
-    misc_arg.add_argument("--pretrained", type=str, default="./pretrained.pt")
+    misc_arg.add_argument("--pretrained", type=str, default=None)
 
     config = parser.parse_args()
 
@@ -99,8 +99,7 @@ def main():
         lower=True,
         batch_first=True,
         init_token=BOS_TOKEN,
-        eos_token=EOS_TOKEN,
-        include_lengths=True
+        eos_token=EOS_TOKEN
     )
     speaker_field = LabelField()
 
@@ -133,19 +132,21 @@ def main():
             max_size=config.max_vocab_size,
             min_freq=config.min_freq)
 
+        speaker_field.build_vocab(train_data.speaker)
+
         os.makedirs(config.vocab_dir)
-        with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'wb') as vocab_file:
+        with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'wb') as vocab_file:
             pickle.dump(post_field.vocab, vocab_file)
-        with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'wb') as vocab_file:
+        with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'wb') as vocab_file:
             pickle.dump(response_field.vocab, vocab_file)
-        with open(os.path.join(config.vocab_dir, 'speaker_vocab.pkl'), 'wb') as vocab_file:
+        with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'wb') as vocab_file:
             pickle.dump(speaker_field.vocab, vocab_file)
     else:
-        with open(os.path.join(config.vocab_dir, 'post_vocab.pkl'), 'rb') as vocab_file:
+        with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'rb') as vocab_file:
             post_field.vocab = pickle.load(vocab_file)
-        with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
+        with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as vocab_file:
             response_field.vocab = pickle.load(vocab_file)
-        with open(os.path.join(config.vocab_dir, 'speaker_vocab.pkl'), 'rb') as vocab_file:
+        with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as vocab_file:
             speaker_field.vocab = pickle.load(vocab_file)
 
     train_iter = BucketIterator(
@@ -251,7 +252,7 @@ def main():
         save_summary=False)
     if config.ckpt is not None:
         trainer.load(file_prefix=config.ckpt)
-    else:
+    elif config.pretrained is not None:
         model.load(config.pretrained)
     trainer.train()
     logger.info("Training done!")

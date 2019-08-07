@@ -25,12 +25,20 @@ class EmbeddingRanker(BaseModel):
         self.margin = margin
 
     def forward(self, inputs):
-        embedded_post = self.post_embedding(inputs.post)
+        if isinstance(inputs.post, tuple):
+            post, post_len = inputs.post
+        else:
+            post = inputs.post
+        if isinstance(inputs.response, tuple):
+            response, response_len = inputs.response
+        else:
+            response = inputs.response
+        embedded_post = self.post_embedding(post)
         post_mask = inputs.post.ne(self.padding_idx)
         # shape: (batch_size, embedding_size)
         post_vectors = masked_sum(embedded_post, post_mask.unsqueeze(2), 1)
         batch_size = post_vectors.size(0)
-        embedded_response = self.response_embedding(inputs.response)
+        embedded_response = self.response_embedding(response)
         response_mask = inputs.response.ne(self.padding_idx)
         # shape: (batch_size, embedding_size)
         response_vectors = masked_sum(embedded_response, response_mask.unsqueeze(2), 1)
@@ -43,6 +51,7 @@ class EmbeddingRanker(BaseModel):
         return loss
 
     def rank_with_tensor(self, post, candidate, topk):
+        # `candidate` is candidate vectors tensor
         embedded_post = self.post_embedding(post)
         post_mask = post.ne(self.padding_idx)
         # shape: (batch_size, embedding_size)
@@ -52,6 +61,7 @@ class EmbeddingRanker(BaseModel):
         return score, indices
 
     def rank_with_sentences(self, post, candidate, topk):
+        # `candidate` is candidate sentences token tensor
         embedded_post = self.post_embedding(post)
         post_mask = post.ne(self.padding_idx)
         # shape: (batch_size, embedding_size)
@@ -97,6 +107,7 @@ class EmbeddingRanker(BaseModel):
         return metrics
 
     def get_candidate_vector(self, candidate):
+        # `candidate` is candidate sentences token tensor
         embedded_candidate = self.response_embedding(candidate)
         candidate_mask = candidate.ne(self.padding_idx)
         # shape: (num_samples, embedding_size)

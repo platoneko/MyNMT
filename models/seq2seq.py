@@ -45,11 +45,11 @@ class Seq2Seq(BaseModel):
 
         decoder_attn = MLPAttention(hidden_size, hidden_size, hidden_size)
         decoder_input_size = embedding_size + hidden_size
-        num_classes = response_embedding.weight.size(0)
+        vocab_size = response_embedding.weight.size(0)
         self.decoder = StackGRUDecoder(
             decoder_input_size,
             hidden_size,
-            num_classes,
+            vocab_size,
             start_index,
             end_index,
             response_embedding,
@@ -69,12 +69,14 @@ class Seq2Seq(BaseModel):
         if is_training:
             assert inputs.response is not None
         if hasattr(inputs, 'response'):
-            response_token, response_len = inputs.response
-
+            if isinstance(inputs.response, tuple):
+                response_token, response_len = inputs.response
+            else:
+                response_token = inputs.response
         post_token, post_len = inputs.post
         embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = get_sequence_mask(post_len)
+        encoder_outputs_mask = post_token.ne(self.padding_index)
         if is_training:
             logits = self.decoder(
                 encoder_hidden,
@@ -101,7 +103,7 @@ class Seq2Seq(BaseModel):
         post_token, post_len = inputs.post
         embedded_post = self.post_embedding(post_token)
         encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = get_sequence_mask(post_len)
+        encoder_outputs_mask = post_token.ne(self.padding_index)
         all_top_k_predictions, log_probabilities = \
             self.decoder.forward_beam_search(encoder_hidden,
                                              attn_value=encoder_outputs,

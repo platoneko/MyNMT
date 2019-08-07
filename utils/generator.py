@@ -16,7 +16,9 @@ class Generator(object):
             self,
             model,
             data_iter,
-            vocab,
+            post_vocab,
+            response_vocab,
+            speaker_vocab,
             logger,
             beam_size=4,
             per_node_beam_size=4,
@@ -27,13 +29,15 @@ class Generator(object):
         self.beam_size = beam_size
         self.per_node_beam_size = per_node_beam_size
         self.data_iter = data_iter
-        self.vocab = vocab
+        self.post_vocab = post_vocab
+        self.response_vocab = response_vocab
+        self.speaker_vocab = speaker_vocab
         self.result_path = result_path
         self._new_file = True
         self.logger = logger
 
-        self.end_index = self.vocab.stoi[EOS_TOKEN]
-        self.padding_index = self.vocab.stoi[PAD_TOKEN]
+        self.end_index = self.response_vocab.stoi[EOS_TOKEN]
+        self.padding_index = self.response_vocab.stoi[PAD_TOKEN]
 
     def generate(self):
         """
@@ -69,10 +73,10 @@ class Generator(object):
 
         response_token, response_len = inputs.response
         target = response_token[:, 1:]
-        metrics = self.collect_metrics(outputs, target)
+        metrics = self.collect_metrics(inputs, outputs, target)
         return metrics
 
-    def collect_metrics(self, outputs, target):
+    def collect_metrics(self, inputs, outputs, target):
         """
         Collect metrics and save generated results
         """
@@ -90,9 +94,10 @@ class Generator(object):
         acc = accuracy(predictions, target,
                        padding_idx=self.padding_index,
                        end_idx=self.end_index)
-        predict_sentences = self.tensor2str(predictions)
-
-        target_sentences = self.tensor2str(target)
+        speaker = tensor2str(inputs.speaker, self.speaker_vocab, sequential=False)
+        predict_sentences = tensor2str(predictions, self.response_vocab, sequential=True, end_index=self.end_index)
+        post_sentences = tensor2str(inputs.post[0], self.post_vocab, sequential=True, end_index=self.padding_index)
+        target_sentences = tensor2str(target, self.response_vocab, sequential=True, end_index=self.end_index)
         bleu_score = bleu(predict_sentences, target_sentences)
         intra_dist1, intra_dist2, inter_dist1, inter_dist2 = distinct(predict_sentences)
         metrics.add(acc=acc,
@@ -102,32 +107,43 @@ class Generator(object):
                     inter_dist1=inter_dist1,
                     inter_dist2=inter_dist2)
         if self.result_path is not None:
-            self.save_result(predict_sentences, info="-----------predict----------\n")
-            self.save_result(target_sentences, info="-----------target----------\n")
+            self.save_result(speaker, post_sentences, target_sentences, predict_sentences)
         return metrics
 
-    def tensor2str(self, tensor):
-        batch_size = tensor.size(0)
-        sentences = []
+    def save_result(self, speaker, post, target, predict):
+        if self._new_file:
+            self._new_file = False
+            with open(self.result_path, 'w') as result_file:
+                for spk, pos, tgt, pred in zip(speaker, post, target, predict):
+                    result_file.write("----------------------------------------\n")
+                    result_file.write("- {}\n".format(spk))
+                    result_file.write("> {}\n".format(pos))
+                    result_file.write("< {}\n".format(tgt))
+                    result_file.write("< {}\n".format(pred))
+        else:
+            with open(self.result_path, 'a') as result_file:
+                for spk, pos, tgt, pred in zip(speaker, post, target, predict):
+                    result_file.write("----------------------------------------\n")
+                    result_file.write("- {}\n".format(spk))
+                    result_file.write("> {}\n".format(pos))
+                    result_file.write("< {}\n".format(tgt))
+                    result_file.write("< {}\n".format(pred))
+
+
+def tensor2str(tensor, vocab, sequential=True, end_index=-1):
+    batch_size = tensor.size(0)
+    if sequential:
+        strings = []
         for idx in range(batch_size):
             array = tensor[idx].tolist()
             token_list = []
             for token_id in array:
-                if token_id == self.end_index:
+                if token_id == end_index:
                     break
-                token_list.append(self.vocab.itos[token_id])
-            sentences.append(' '.join(token_list))
-        return sentences
+                token_list.append(vocab.itos[token_id])
+            strings.append(' '.join(token_list))
+    else:
+        strings = [vocab.itos[token_id] for token_id in tensor.tolist()]
+    return strings
 
-    def save_result(self, sentences, info=None):
-        if self._new_file:
-            self._new_file = False
-            with open(self.result_path, 'w') as result_file:
-                if info is not None:
-                    result_file.write(info)
-                result_file.writelines([s + '\n' for s in sentences])
-        else:
-            with open(self.result_path, 'a') as result_file:
-                if info is not None:
-                    result_file.write(info)
-                result_file.writelines([s + '\n' for s in sentences])
+

@@ -8,7 +8,7 @@ from torchtext.data import Field, LabelField
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
-from models.classifier import RNNClassifier
+from models.classifier import ConvClassifier
 from utils.trainer import Trainer
 
 import pickle
@@ -80,7 +80,7 @@ def main():
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        include_lengths=True
+        include_lengths=False
     )
 
     speaker_field = LabelField()
@@ -102,10 +102,10 @@ def main():
         fields=fields
     )
 
-    with open(os.path.join(config.vocab_dir, 'response_vocab.pkl'), 'rb') as vocab_file:
-        response_field.vocab = pickle.load(vocab_file)
-    with open(os.path.join(config.vocab_dir, 'speaker_vocab.pkl'), 'rb') as vocab_file:
-        speaker_field.vocab = pickle.load(vocab_file)
+    with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as response_vocab:
+        response_field.vocab = pickle.load(response_vocab)
+    with open(os.path.join(config.vocab_dir, 'classifier_speaker.vocab.pkl'), 'rb') as speaker_vocab:
+        speaker_field.vocab = pickle.load(speaker_vocab)
 
     train_iter = BucketIterator(
         train_data,
@@ -121,10 +121,11 @@ def main():
     )
 
     # Model definition
-    response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    model = RNNClassifier(
+    classifier_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
+    model = ConvClassifier(
         config.embedding_size,
-        response_embedding,
+        classifier_embedding,
+        kernel_size=config.kernel_size,
         num_classes=len(speaker_field.vocab),
         padding_idx=response_field.vocab.stoi[PAD_TOKEN])
     model.to(device)

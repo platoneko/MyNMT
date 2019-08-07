@@ -6,13 +6,24 @@ import torch.nn as nn
 from torchtext.data import Field
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
-from models.classifier import RNNClassifier
+from models.classifier import ConvClassifier
 
 
 BOS_TOKEN = "<bos>"
 EOS_TOKEN = "<eos>"
 PAD_TOKEN = "<pad>"
 UNK_TOKEN = "<unk>"
+
+# args
+# SPEAKERS = ('Amy', 'Bernadette', 'Howard', 'Leonard', 'Penny', 'Raj', 'Sheldon')
+DATA_DIR = './dataset'
+EMBEDDING_SIZE = 500
+KERNEL_SIZE = 3
+PRETRAINED_CLASSIFIER = "./outputs/classifier/best.model"
+TOPK = 20
+UNK_SPEAKER = False
+GPU = 0
+BATCH_SIZE = 32
 
 
 class TopkCollector(object):
@@ -50,7 +61,7 @@ class TopkCollector(object):
 
     def iterate(self, inputs):
         # `probabilities` of shape (batch_size, num_classes)
-        outputs = self.classifier.forward(inputs)
+        outputs = self.classifier.forward(inputs.response)
         probabilities = outputs.probabilities[:, self.speaker_id]
         batch_size = probabilities.size(0)
         topk_probabilities, topk_indices = probabilities.topk(min(self.k, batch_size), dim=0)
@@ -61,12 +72,8 @@ class TopkCollector(object):
 
 
 if __name__ == "__main__":
-    SPEAKERS = ('Amy', 'Bernadette', 'Howard', 'Leonard', 'Penny', 'Raj', 'Sheldon')
-    data_dir = './dataset'
-    embedding_size = 500
-
-    if torch.cuda.is_available():
-        device = torch.device(0)
+    if torch.cuda.is_available() and GPU >= 0:
+        device = torch.device(GPU)
     else:
         device = torch.device('cpu')
 
@@ -78,39 +85,40 @@ if __name__ == "__main__":
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        include_lengths=True
+        include_lengths=False
     )
 
     fields = {
         'response': ('response', response_field)
     }
 
-    with open(os.path.join('./vocab', 'response_vocab.pkl'), 'rb') as vocab_file:
-        response_field.vocab = pickle.load(vocab_file)
-    with open(os.path.join('./vocab', 'speaker_vocab.pkl'), 'rb') as vocab_file:
-        speaker_dict = pickle.load(vocab_file).itos
+    with open(os.path.join('./vocab', 'response.vocab.pkl'), 'rb') as response_vocab:
+        response_field.vocab = pickle.load(response_vocab)
+    with open(os.path.join('./vocab', 'speaker.vocab.pkl'), 'rb') as speaker_vocab:
+        speaker_dict = pickle.load(speaker_vocab).itos
 
-    response_embedding = nn.Embedding(len(response_field.vocab), embedding_size)
-    classifier = RNNClassifier(
-        embedding_size=embedding_size,
+    response_embedding = nn.Embedding(len(response_field.vocab), EMBEDDING_SIZE)
+    classifier = ConvClassifier(
+        embedding_size=EMBEDDING_SIZE,
         response_embedding=response_embedding,
-        num_classes=len(speaker_dict),
+        kernel_size=KERNEL_SIZE,
+        num_classes=len(speaker_dict)+1 if UNK_SPEAKER else len(speaker_dict),
         padding_idx=response_field.vocab.stoi[PAD_TOKEN]
     )
-    classifier.load('./outputs/classifier/state_epoch_2.model')
+    classifier.load(PRETRAINED_CLASSIFIER)
     classifier.to(device)
     vector_list = []
     for i in range(len(speaker_dict)):
         speaker = speaker_dict[i]
 
         data = TabularDataset(
-            path=os.path.join(data_dir, "{}.json".format(speaker)),
+            path=os.path.join(DATA_DIR, "{}.json".format(speaker)),
             format='json',
             fields=fields
         )
         data_iter = BucketIterator(
             data,
-            batch_size=32,
+            batch_size=BATCH_SIZE,
             device=device
         )
 
@@ -119,11 +127,11 @@ if __name__ == "__main__":
             data_iter=data_iter,
             speaker=speaker,
             speaker_id=i,
-            k=20)
+            k=TOPK)
 
         # shape: (k, embedding_size)
-        vectors = collector.collect(data_dir=data_dir)
+        vectors = collector.collect(data_dir=DATA_DIR)
         vector_list.append(vectors.unsqueeze(0))
 
     vectors = torch.cat(vector_list)
-    torch.save(vectors, './outputs/classifier/topk_vectors.pt')
+    torch.save(vectors, './style_lib.pt')

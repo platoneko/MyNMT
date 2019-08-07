@@ -4,11 +4,12 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
-from torchtext.data import Field
+from torchtext.data import Field, LabelField
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
-from models.ranker import EmbeddingRanker
+from models.style_seq2seq import StyleSeq2Seq, InfoRetriever
+from models.classifier import ConvClassifier
 from utils.trainer import Trainer
 
 import pickle
@@ -31,13 +32,26 @@ def get_config():
     data_arg.add_argument("--train_path", type=str, required=True)
     data_arg.add_argument("--valid_path", type=str, required=True)
     data_arg.add_argument("--vocab_dir", type=str, default="./vocab")
-    data_arg.add_argument("--pretrained_vector", type=str, default="./pretrained_vector.pt")
-    data_arg.add_argument("--fix_length", type=int, default=20)
+    data_arg.add_argument("--max_vocab_size", type=int, default=50000)
+    data_arg.add_argument("--min_freq", type=int, default=5)
 
     # Model
     model_arg = parser.add_argument_group("Model")
     model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
-    model_arg.add_argument("--margin", type=float, default=1.0)
+    model_arg.add_argument("--hidden_size", type=int, default=500)
+    model_arg.add_argument("--num_layers", type=int, default=2)
+    model_arg.add_argument("--dropout", type=float, default=0.2)
+    model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
+    model_arg.add_argument("--num_hops", type=int, default=2)
+    model_arg.add_argument("--topk", type=int, default=20)
+    model_arg.add_argument("--reinforce", type=bool, default=False)
+    model_arg.add_argument("--reinforce_rate", type=float, default=0.5)
+
+    # InfoRetriever
+    ir_arg = parser.add_argument_group("IR")
+    ir_arg.add_argument("--candidate_lib", type=str, default="./candidate_lib.pt")
+    ir_arg.add_argument("--style_lib", type=str, default="./style_lib.pt")
+    ir_arg.add_argument("--pretrained_classifier", type=str, default="./pretrained_classifier.pt")
 
     # Training
     train_arg = parser.add_argument_group("Training")
@@ -55,7 +69,8 @@ def get_config():
     misc_arg.add_argument("--valid_steps", type=int, default=800)
     misc_arg.add_argument("--batch_size", type=int, default=32)
     misc_arg.add_argument("--ckpt", type=str)
-    data_arg.add_argument("--save_dir", type=str, default="./outputs/ranker")
+    misc_arg.add_argument("--save_dir", type=str, default="./outputs/")
+    misc_arg.add_argument("--pretrained", type=str, default=None)
 
     config = parser.parse_args()
 
@@ -81,18 +96,25 @@ def main():
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
+        include_lengths=True
     )
     response_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        fix_length=config.fix_length
+        init_token=BOS_TOKEN,
+        eos_token=EOS_TOKEN,
+        include_lengths=True
     )
+    speaker_field = LabelField()
+    candidate_field = LabelField(use_vocab=False)
 
     fields = {
         'post': ('post', post_field),
         'response': ('response', response_field),
+        'speaker': ('speaker', speaker_field),
+        'candidate': ('candidate', candidate_field)
     }
 
     train_data = TabularDataset(
@@ -111,6 +133,8 @@ def main():
         post_field.vocab = pickle.load(post_vocab)
     with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as response_vocab:
         response_field.vocab = pickle.load(response_vocab)
+    with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as speaker_vocab:
+        speaker_field.vocab = pickle.load(speaker_vocab)
 
     train_iter = BucketIterator(
         train_data,
@@ -125,15 +149,47 @@ def main():
         device=device
     )
 
+    # InfoRetriever definition
+    candidate_lib = torch.load(config.candidate_lib)
+    style_lib = torch.load(config.style_lib)
+    classifier = None
+    if config.reinforce:
+        classifier_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
+        classifier = ConvClassifier(
+                config.embedding_size,
+                classifier_embedding,
+                kernel_size=config.kernel_size,
+                num_classes=len(speaker_field.vocab),
+                padding_idx=response_field.vocab.stoi[PAD_TOKEN]
+        )
+        classifier.to(device)
+        classifier.load(config.pretrained_classifier)
+    ir = InfoRetriever(candidate_lib=candidate_lib,
+                       style_lib=style_lib,
+                       classifier=classifier)
+
     # Model definition
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    model = EmbeddingRanker(
-        config.embedding_size,
-        post_embedding,
-        response_embedding,
-        padding_idx=response_field.vocab.stoi[PAD_TOKEN],
-        margin=config.margin)
+    profile_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
+    model = StyleSeq2Seq(
+        post_embedding=post_embedding,
+        response_embedding=response_embedding,
+        profile_embedding=profile_embedding,
+        embedding_size=config.embedding_size,
+        hidden_size=config.hidden_size,
+        start_index=response_field.vocab.stoi[BOS_TOKEN],
+        end_index=response_field.vocab.stoi[EOS_TOKEN],
+        padding_index=response_field.vocab.stoi[PAD_TOKEN],
+        ir=ir,
+        num_layers=config.num_layers,
+        dropout=config.dropout,
+        teaching_force_rate=config.teaching_force_rate,
+        num_hops=config.num_hops,
+        topk=config.topk,
+        reinforce=config.reinforce,
+        reinforce_rate=config.reinforce_rate
+    )
     model.to(device)
 
     # Optimizer definition
@@ -186,8 +242,8 @@ def main():
         save_summary=False)
     if config.ckpt is not None:
         trainer.load(file_prefix=config.ckpt)
-    else:
-        model.load(config.pretrained_vector)
+    elif config.pretrained is not None:
+        model.load(config.pretrained)
     trainer.train()
     logger.info("Training done!")
 
