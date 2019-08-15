@@ -64,12 +64,12 @@ class Generator(object):
 
         if self.beam_size == 1:
             test_outputs = self.model.forward(inputs, is_training=False)
-            predictions = test_outputs.logits.argmax(dim=2)
-            outputs.add(predictions=predictions)
+            prediction = test_outputs.logits.argmax(dim=2)
+            outputs.add(prediction=prediction)
         else:
             test_outputs = \
                 self.model.beam_search(inputs, self.beam_size, self.per_node_beam_size)
-            outputs.add(predictions=test_outputs.predictions)
+            outputs.add(prediction=test_outputs.prediction)
 
         response_token, response_len = inputs.response
         target = response_token[:, 1:]
@@ -84,28 +84,26 @@ class Generator(object):
         metrics = Pack(num_samples=num_samples)
 
         logits = outputs.logits
-        num_tokens = target.ne(self.padding_index).sum().item()
+        # num_tokens = target.ne(self.padding_index).sum().item()
         nll = self.model.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
-        mean_nll = nll / num_tokens
+        mean_nll = nll
         ppx = math.exp(mean_nll.item())
         metrics.add(nll=mean_nll, ppx=ppx)
 
-        predictions = outputs.predictions
-        acc = accuracy(predictions, target,
+        prediction = outputs.prediction
+        acc = accuracy(prediction, target,
                        padding_idx=self.padding_index,
                        end_idx=self.end_index)
         speaker = tensor2str(inputs.speaker, self.speaker_vocab, sequential=False)
-        predict_sentences = tensor2str(predictions, self.response_vocab, sequential=True, end_index=self.end_index)
+        predict_sentences = tensor2str(prediction, self.response_vocab, sequential=True, end_index=self.end_index)
         post_sentences = tensor2str(inputs.post[0], self.post_vocab, sequential=True, end_index=self.padding_index)
         target_sentences = tensor2str(target, self.response_vocab, sequential=True, end_index=self.end_index)
         bleu_score = bleu(predict_sentences, target_sentences)
-        intra_dist1, intra_dist2, inter_dist1, inter_dist2 = distinct(predict_sentences)
+        dist1, dist2 = distinct(predict_sentences)
         metrics.add(acc=acc,
                     bleu_score=bleu_score,
-                    intra_dist1=intra_dist1,
-                    intra_dist2=intra_dist2,
-                    inter_dist1=inter_dist1,
-                    inter_dist2=inter_dist2)
+                    dist1=dist1,
+                    dist2=dist2)
         if self.result_path is not None:
             self.save_result(speaker, post_sentences, target_sentences, predict_sentences)
         return metrics

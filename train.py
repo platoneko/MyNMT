@@ -159,7 +159,8 @@ def main():
     valid_iter = BucketIterator(
         valid_data,
         batch_size=config.batch_size,
-        device=device
+        device=device,
+        shuffle=False
     )
 
     # Model definition

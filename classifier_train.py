@@ -8,7 +8,7 @@ from torchtext.data import Field, LabelField
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
-from models.classifier import ConvClassifier
+from models.classifier import DeltaConvClassifier
 from utils.trainer import Trainer
 
 import pickle
@@ -87,6 +87,7 @@ def main():
 
     fields = {
         'response': ('response', response_field),
+        'destylized': ('destylized', response_field),
         'speaker': ('speaker', speaker_field)
     }
 
@@ -104,7 +105,7 @@ def main():
 
     with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as response_vocab:
         response_field.vocab = pickle.load(response_vocab)
-    with open(os.path.join(config.vocab_dir, 'classifier_speaker.vocab.pkl'), 'rb') as speaker_vocab:
+    with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as speaker_vocab:
         speaker_field.vocab = pickle.load(speaker_vocab)
 
     train_iter = BucketIterator(
@@ -117,12 +118,13 @@ def main():
     valid_iter = BucketIterator(
         valid_data,
         batch_size=config.batch_size,
-        device=device
+        device=device,
+        shuffle=False
     )
 
     # Model definition
     classifier_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    model = ConvClassifier(
+    model = DeltaConvClassifier(
         config.embedding_size,
         classifier_embedding,
         kernel_size=config.kernel_size,

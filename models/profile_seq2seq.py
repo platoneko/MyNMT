@@ -62,7 +62,7 @@ class ProfileSeq2Seq(BaseModel):
             attention=decoder_attn,
             dropout=dropout
         )
-        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='sum')
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='mean')
         self.mmi_anti = mmi_anti
         self.anti_gamma = anti_gamma
         self.anti_rate = anti_rate
@@ -74,19 +74,19 @@ class ProfileSeq2Seq(BaseModel):
         if is_training:
             assert inputs.response is not None
         if hasattr(inputs, 'response'):
-            response_token, response_len = inputs.response
+            response_tokens, response_len = inputs.response
 
-        post_token, post_len = inputs.post
-        embedded_post = self.post_embedding(post_token)
-        encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = post_token.ne(self.padding_index)
+        post_tokens, post_len = inputs.post
+        embedded_post = self.post_embedding(post_tokens)
+        encoder_output, encoder_hidden = self.encoder((embedded_post, post_len))
+        encoder_output_mask = post_tokens.ne(self.padding_index)
         if is_training:
             logits = self.decoder(
                 encoder_hidden,
                 inputs.speaker,
-                target=response_token,
-                attn_value=encoder_outputs,
-                attn_mask=encoder_outputs_mask,
+                target=response_tokens,
+                attn_value=encoder_output,
+                attn_mask=encoder_output_mask,
                 teaching_force_rate=self.teaching_force_rate,
                 is_training=is_training
             )
@@ -96,8 +96,8 @@ class ProfileSeq2Seq(BaseModel):
                 encoder_hidden,
                 inputs.speaker,
                 target=None,
-                attn_value=encoder_outputs,
-                attn_mask=encoder_outputs_mask,
+                attn_value=encoder_output,
+                attn_mask=encoder_output_mask,
                 is_training=False
             )
         outputs = Pack(logits=logits)
@@ -105,20 +105,20 @@ class ProfileSeq2Seq(BaseModel):
 
     def beam_search(self, inputs, beam_size=4, per_node_beam_size=4):
         # designed for test or interactive mode
-        post_token, post_len = inputs.post
-        embedded_post = self.post_embedding(post_token)
-        encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = post_token.ne(self.padding_index)
+        post_tokens, post_len = inputs.post
+        embedded_post = self.post_embedding(post_tokens)
+        encoder_output, encoder_hidden = self.encoder((embedded_post, post_len))
+        encoder_output_mask = post_tokens.ne(self.padding_index)
         all_top_k_predictions, log_probabilities = \
             self.decoder.forward_beam_search(
                 encoder_hidden,
                 inputs.speaker,
-                attn_value=encoder_outputs,
-                attn_mask=encoder_outputs_mask,
+                attn_value=encoder_output,
+                attn_mask=encoder_output_mask,
                 beam_size=beam_size,
                 per_node_beam_size=per_node_beam_size)
-        predictions = all_top_k_predictions[:, 0, :]
-        outputs = Pack(predictions=predictions)
+        prediction = all_top_k_predictions[:, 0, :]
+        outputs = Pack(prediction=prediction)
         return outputs
 
     @overrides
@@ -132,12 +132,13 @@ class ProfileSeq2Seq(BaseModel):
         logits = outputs.logits
         nll = self.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
         loss += nll
-        num_tokens = target.ne(self.padding_index).sum().item()
-        mean_nll = nll / num_tokens
-        predictions = logits.argmax(dim=2)
-        acc = accuracy(predictions, target, padding_idx=self.padding_index, end_idx=self.end_index)
-        metrics.add(nll=mean_nll, acc=acc)
-        metrics.add(ppx=math.exp(mean_nll.item()))
+        # num_tokens = target.ne(self.padding_index).sum().item()
+        # mean_nll = nll / num_tokens
+        prediction = logits.argmax(dim=2)
+        acc = accuracy(prediction, target, padding_idx=self.padding_index, end_idx=self.end_index)
+        metrics.add(nll=nll, acc=acc)
+        metrics.add(ppx=math.exp(nll.item()))
+        '''
         if self.mmi_anti:
             gamma_logits = logits[:, :self.anti_gamma, :]
             gamma_target = target[:, :self.anti_gamma]
@@ -145,6 +146,7 @@ class ProfileSeq2Seq(BaseModel):
                     self.cross_entropy(gamma_logits.reshape(-1, logits.size(-1)),
                                        gamma_target.reshape(-1))
         loss = loss / num_tokens
+        '''
         metrics.add(loss=loss)
         return metrics
 
@@ -154,8 +156,8 @@ class ProfileSeq2Seq(BaseModel):
         iterate
         """
         outputs = self.forward(inputs, is_training=True)
-        response_token, response_len = inputs.response
-        target = response_token[:, 1:]
+        response_tokens, response_len = inputs.response
+        target = response_tokens[:, 1:]
         metrics = self.collect_metrics(outputs, target)
 
         loss = metrics.loss
@@ -250,41 +252,41 @@ class ProfileDecoder(nn.Module):
             num_steps = target.size(1) - 1
 
         embedded_profile = self.profile_embedding(profile)
-        last_predictions = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
+        last_prediction = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
         step_logits = []
         for timestep in range(num_steps):
-            if not is_training and (last_predictions == self.end_index).all():
+            if not is_training and (last_prediction == self.end_index).all():
                 break
             if is_training and torch.rand(1).item() < teaching_force_rate:
-                inputs = target[:, timestep]
+                input = target[:, timestep]
             else:
-                inputs = last_predictions
-            # `outputs` of shape (batch_size, vocab_size)
-            outputs, hidden = self._take_step(inputs, hidden, embedded_profile, attn_value, attn_mask)
+                input = last_prediction
+            # `output` of shape (batch_size, vocab_size)
+            output, hidden = self._take_step(input, hidden, embedded_profile, attn_value, attn_mask)
             # shape: (batch_size,)
-            last_predictions = torch.argmax(outputs, dim=-1)
-            step_logits.append(outputs.unsqueeze(1))
+            last_prediction = torch.argmax(output, dim=-1)
+            step_logits.append(output.unsqueeze(1))
 
         logits = torch.cat(step_logits, dim=1)
         return logits
 
-    def _take_step(self, inputs, hidden, profile, attn_value=None, attn_mask=None):
-        # `inputs` of shape: (batch_size,)
+    def _take_step(self, input, hidden, profile, attn_value=None, attn_mask=None):
+        # `input` of shape: (batch_size,)
         # `hidden` of shape: (num_layers, batch_size, hidden_size)
         # shape: (batch_size, input_size)
-        embedded_inputs = self.text_embedding(inputs)
-        rnn_inputs = embedded_inputs
+        embedded_input = self.text_embedding(input)
+        rnn_input = embedded_input
         if self.attention is not None:
             # shape: (batch_size, num_rows)
             attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
+            attn_input = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
             # shape: (batch_size, input_size + attn_size)
-            rnn_inputs = torch.cat([rnn_inputs, attn_inputs], dim=-1)
-        rnn_inputs = torch.cat([rnn_inputs, profile], dim=-1)
-        _, next_hidden = self.rnn(rnn_inputs.unsqueeze(1), hidden)
+            rnn_input = torch.cat([rnn_input, attn_input], dim=-1)
+        rnn_input = torch.cat([rnn_input, profile], dim=-1)
+        _, next_hidden = self.rnn(rnn_input.unsqueeze(1), hidden)
         # shape: (batch_size, vocab_size)
-        outputs = self.output_layer(next_hidden[-1])
-        return outputs, next_hidden
+        output = self.output_layer(next_hidden[-1])
+        return output, next_hidden
 
     def forward_beam_search(
             self,
@@ -326,7 +328,7 @@ class ProfileDecoder(nn.Module):
             assert attn_value is not None
 
         beam_search = BeamSearch(self.end_index, num_steps, beam_size, per_node_beam_size)
-        start_predictions = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
+        start_prediction = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
         embedded_profile = self.profile_embedding(profile)
         # `hidden` of shape: (batch_size, num_layers, hidden_size)
         hidden = hidden.transpose(0, 1).contiguous()
@@ -335,13 +337,13 @@ class ProfileDecoder(nn.Module):
             state['attn_value'] = attn_value
             state['attn_mask'] = attn_mask
         all_top_k_predictions, log_probabilities = \
-            beam_search.search(start_predictions, state, self._beam_step, early_stop=True)
+            beam_search.search(start_prediction, state, self._beam_step, early_stop=True)
         return all_top_k_predictions, log_probabilities
 
-    def _beam_step(self, inputs, state):
+    def _beam_step(self, input, state):
         # shape: (group_size, input_size)
-        embedded_inputs = self.text_embedding(inputs)
-        rnn_inputs = embedded_inputs
+        embedded_input = self.text_embedding(input)
+        rnn_input = embedded_input
         profile = state['profile']
         # shape: (group_size, num_layers, input_size)
         hidden = state['hidden']
@@ -352,11 +354,11 @@ class ProfileDecoder(nn.Module):
             attn_mask = state['attn_mask']
             # shape: (group_size, num_rows)
             attn_score = self.attention(hidden[-1], attn_value, attn_mask)
-            attn_inputs = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
+            attn_input = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
             # shape: (group_size, input_size + attn_size)
-            rnn_inputs = torch.cat([rnn_inputs, attn_inputs], dim=-1)
-        rnn_inputs = torch.cat([rnn_inputs, profile], dim=-1)
-        _, next_hidden = self.rnn(rnn_inputs.unsqueeze(1), hidden)
+            rnn_input = torch.cat([rnn_input, attn_input], dim=-1)
+        rnn_input = torch.cat([rnn_input, profile], dim=-1)
+        _, next_hidden = self.rnn(rnn_input.unsqueeze(1), hidden)
         state['hidden'] = next_hidden.transpose(0, 1).contiguous()
         # shape: (group_size, vocab_size)
         log_prob = F.log_softmax(self.output_layer(next_hidden[-1]), dim=-1)

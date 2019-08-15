@@ -8,7 +8,7 @@ from torchtext.data import Field
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
-from models.ranker import EmbeddingRanker
+from models.ranker import EmbeddingRanker, RNNRanker
 from utils.trainer import Trainer
 
 import pickle
@@ -81,13 +81,15 @@ def main():
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
+        include_lengths=True
     )
     response_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        fix_length=config.fix_length
+        fix_length=config.fix_length,
+        include_lengths=True
     )
 
     fields = {
@@ -122,13 +124,14 @@ def main():
     valid_iter = BucketIterator(
         valid_data,
         batch_size=config.batch_size,
-        device=device
+        device=device,
+        shuffle=False
     )
 
     # Model definition
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    model = EmbeddingRanker(
+    model = RNNRanker(
         config.embedding_size,
         post_embedding,
         response_embedding,

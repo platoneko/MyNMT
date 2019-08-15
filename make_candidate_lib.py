@@ -6,7 +6,7 @@ import pickle
 
 # args
 FIX_LENGTH = 20
-DATA_PATH = "./dataset/bigbang.json"
+DATA_PATH = "./dataset/wtf.json"
 
 
 if __name__ == "__main__":
@@ -17,7 +17,8 @@ if __name__ == "__main__":
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
-        fix_length=FIX_LENGTH
+        fix_length=FIX_LENGTH,
+        include_lengths=True
     )
 
     fields = {'response': ('candidate', response_field)}
@@ -33,9 +34,9 @@ if __name__ == "__main__":
     data_iter = BucketIterator(
         data,
         batch_size=100000,
-        device='cpu'
+        device='cpu',
+        shuffle=False
     )
 
     for batch in data_iter:
-        print(batch.candidate.size())
         torch.save(batch.candidate, 'candidate_lib.pt')

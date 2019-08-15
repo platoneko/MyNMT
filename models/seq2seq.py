@@ -57,7 +57,7 @@ class Seq2Seq(BaseModel):
             attention=decoder_attn,
             dropout=dropout
         )
-        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='sum')
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='mean')
         self.mmi_anti = mmi_anti
         self.anti_gamma = anti_gamma
         self.anti_rate = anti_rate
@@ -70,19 +70,19 @@ class Seq2Seq(BaseModel):
             assert inputs.response is not None
         if hasattr(inputs, 'response'):
             if isinstance(inputs.response, tuple):
-                response_token, response_len = inputs.response
+                response_tokens, response_len = inputs.response
             else:
-                response_token = inputs.response
-        post_token, post_len = inputs.post
-        embedded_post = self.post_embedding(post_token)
-        encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = post_token.ne(self.padding_index)
+                response_tokens = inputs.response
+        post_tokens, post_len = inputs.post
+        embedded_post = self.post_embedding(post_tokens)
+        encoder_output, encoder_hidden = self.encoder((embedded_post, post_len))
+        encoder_output_mask = post_tokens.ne(self.padding_index)
         if is_training:
             logits = self.decoder(
                 encoder_hidden,
-                target=response_token,
-                attn_value=encoder_outputs,
-                attn_mask=encoder_outputs_mask,
+                target=response_tokens,
+                attn_value=encoder_output,
+                attn_mask=encoder_output_mask,
                 teaching_force_rate=self.teaching_force_rate,
                 is_training=is_training
             )
@@ -91,8 +91,8 @@ class Seq2Seq(BaseModel):
             logits = self.decoder(
                 encoder_hidden,
                 target=None,
-                attn_value=encoder_outputs,
-                attn_mask=encoder_outputs_mask,
+                attn_value=encoder_output,
+                attn_mask=encoder_output_mask,
                 is_training=False
             )
         outputs = Pack(logits=logits)
@@ -100,18 +100,18 @@ class Seq2Seq(BaseModel):
 
     def beam_search(self, inputs, beam_size=4, per_node_beam_size=4):
         # designed for test or interactive mode
-        post_token, post_len = inputs.post
-        embedded_post = self.post_embedding(post_token)
-        encoder_outputs, encoder_hidden = self.encoder((embedded_post, post_len))
-        encoder_outputs_mask = post_token.ne(self.padding_index)
+        post_tokens, post_len = inputs.post
+        embedded_post = self.post_embedding(post_tokens)
+        encoder_output, encoder_hidden = self.encoder((embedded_post, post_len))
+        encoder_output_mask = post_tokens.ne(self.padding_index)
         all_top_k_predictions, log_probabilities = \
             self.decoder.forward_beam_search(encoder_hidden,
-                                             attn_value=encoder_outputs,
-                                             attn_mask=encoder_outputs_mask,
+                                             attn_value=encoder_output,
+                                             attn_mask=encoder_output_mask,
                                              beam_size=beam_size,
                                              per_node_beam_size=per_node_beam_size)
-        predictions = all_top_k_predictions[:, 0, :]
-        outputs = Pack(predictions=predictions)
+        prediction = all_top_k_predictions[:, 0, :]
+        outputs = Pack(prediction=prediction)
         return outputs
 
     @overrides
@@ -125,12 +125,12 @@ class Seq2Seq(BaseModel):
         logits = outputs.logits
         nll = self.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
         loss += nll
-        num_tokens = target.ne(self.padding_index).sum().item()
-        mean_nll = nll / num_tokens
-        predictions = logits.argmax(dim=2)
-        acc = accuracy(predictions, target, padding_idx=self.padding_index, end_idx=self.end_index)
-        metrics.add(nll=mean_nll, acc=acc)
-        metrics.add(ppx=math.exp(mean_nll.item()))
+        # num_tokens = target.ne(self.padding_index).sum().item()
+        prediction = logits.argmax(dim=2)
+        acc = accuracy(prediction, target, padding_idx=self.padding_index, end_idx=self.end_index)
+        metrics.add(nll=nll, acc=acc)
+        metrics.add(ppx=math.exp(nll.item()))
+        '''
         if self.mmi_anti:
             gamma_logits = logits[:, :self.anti_gamma, :]
             gamma_target = target[:, :self.anti_gamma]
@@ -138,6 +138,7 @@ class Seq2Seq(BaseModel):
                     self.cross_entropy(gamma_logits.reshape(-1, logits.size(-1)),
                                        gamma_target.reshape(-1))
         loss = loss / num_tokens
+        '''
         metrics.add(loss=loss)
         return metrics
 
@@ -147,8 +148,8 @@ class Seq2Seq(BaseModel):
         iterate
         """
         outputs = self.forward(inputs, is_training=True)
-        response_token, response_len = inputs.response
-        target = response_token[:, 1:]
+        response_tokens, response_len = inputs.response
+        target = response_tokens[:, 1:]
         metrics = self.collect_metrics(outputs, target)
 
         loss = metrics.loss

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-python ./classifier_train.py --train_path=./dataset/bigbang_train.json \
---valid_path=./dataset/bigbang_valid.json \
+python ./classifier_train.py --train_path=./dataset/delta_classifier_train.json \
+--valid_path=./dataset/delta_classifier_valid.json \
 --vocab_dir=./vocab \
 --pretrained_vector=./pretrained.pt \
 --embedding_size=500 \
@@ -12,5 +12,5 @@ python ./classifier_train.py --train_path=./dataset/bigbang_train.json \
 --gpu=0 \
 --log_steps=100 \
 --valid_steps=1000 \
---batch_size=32 \
---save_dir=./outputs/classifier
+--batch_size=16 \
+--save_dir=./outputs/delta_classifier

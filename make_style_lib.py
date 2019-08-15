@@ -6,7 +6,7 @@ import torch.nn as nn
 from torchtext.data import Field
 from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
-from models.classifier import ConvClassifier
+from models.classifier import DeltaConvClassifier
 
 
 BOS_TOKEN = "<bos>"
@@ -51,7 +51,7 @@ class TopkCollector(object):
         topk_probabilities, indices = candidate_probabilities.topk(self.k, dim=0)
         topk_vectors = candidate_vectors.index_select(0, indices)
         topk_ids = candidate_ids.index_select(0, indices).tolist()
-        with open(os.path.join(data_dir, "{}.json".format(self.speaker)), 'r') as src:
+        with open(os.path.join(data_dir, "destylized_{}.json".format(self.speaker)), 'r') as src:
             lines = src.readlines()
         with open(os.path.join(data_dir, "topk_{}.txt".format(self.speaker)), 'w') as tgt:
             for i, id in enumerate(topk_ids):
@@ -61,11 +61,11 @@ class TopkCollector(object):
 
     def iterate(self, inputs):
         # `probabilities` of shape (batch_size, num_classes)
-        outputs = self.classifier.forward(inputs.response)
-        probabilities = outputs.probabilities[:, self.speaker_id]
-        batch_size = probabilities.size(0)
-        topk_probabilities, topk_indices = probabilities.topk(min(self.k, batch_size), dim=0)
-        topk_vectors = outputs.vectors.index_select(0, topk_indices)
+        outputs = self.classifier.forward(inputs.response, inputs.destylized)
+        probability = outputs.probability[:, self.speaker_id]
+        batch_size = probability.size(0)
+        topk_probabilities, topk_indices = probability.topk(min(self.k, batch_size), dim=0)
+        topk_vectors = outputs.vector.index_select(0, topk_indices)
         topk_ids = topk_indices + self.num_samples
         self.num_samples += batch_size
         return topk_vectors, topk_probabilities, topk_ids
@@ -89,7 +89,8 @@ if __name__ == "__main__":
     )
 
     fields = {
-        'response': ('response', response_field)
+        'response': ('response', response_field),
+        'destylized': ('destylized', response_field)
     }
 
     with open(os.path.join('./vocab', 'response.vocab.pkl'), 'rb') as response_vocab:
@@ -98,7 +99,7 @@ if __name__ == "__main__":
         speaker_dict = pickle.load(speaker_vocab).itos
 
     response_embedding = nn.Embedding(len(response_field.vocab), EMBEDDING_SIZE)
-    classifier = ConvClassifier(
+    classifier = DeltaConvClassifier(
         embedding_size=EMBEDDING_SIZE,
         response_embedding=response_embedding,
         kernel_size=KERNEL_SIZE,
@@ -112,14 +113,15 @@ if __name__ == "__main__":
         speaker = speaker_dict[i]
 
         data = TabularDataset(
-            path=os.path.join(DATA_DIR, "{}.json".format(speaker)),
+            path=os.path.join(DATA_DIR, "destylized_{}.json".format(speaker)),
             format='json',
             fields=fields
         )
         data_iter = BucketIterator(
             data,
             batch_size=BATCH_SIZE,
-            device=device
+            device=device,
+            shuffle=False
         )
 
         collector = TopkCollector(
