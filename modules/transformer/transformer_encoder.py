@@ -5,15 +5,7 @@ import numpy as np
 
 from modules.transformer.multi_head_attention import MultiHeadAttention
 from modules.transformer.transformer_ffn import TransformerFFN
-from modules.utils import create_positional_features, get_device_of
-
-
-def _normalize(tensor, norm_layer):
-    """
-    Broadcast layer norm
-    """
-    size = tensor.size()
-    return norm_layer(tensor.view(-1, size[-1])).view(size)
+from modules.utils import *
 
 
 class TransformerEncoder(nn.Module):
@@ -28,12 +20,11 @@ class TransformerEncoder(nn.Module):
             embedding_size,
             embedding,
             ffn_size,
-            pad_index,
             dropout=0.0,
             attention_dropout=None,
             relu_dropout=None,
-            learn_positional_embeddings=False,
-            embeddings_scale=False,
+            learn_position_embedding=False,
+            embedding_scale=False,
             reduction=False,
             num_positions=1024
     ):
@@ -49,25 +40,25 @@ class TransformerEncoder(nn.Module):
             An embedding matrix for the bottom layer of the transformer.
         ffn_size : ``int``,  required.
             The size of the hidden layer in the FFN.
-        pad_index : ``int``, required.
-            Reserved padding index in the embeddings matrix.
+        padding_index : ``int``, required.
+            Reserved padding index in the embedding matrix.
         dropout : ``float``, optional (default = 0.0)
-            Dropout used around embeddings and before layer normalizations.
+            Dropout used around embedding and before layer normalizations.
             This is used in Vaswani 2017 and works well on large datasets.
         attention_dropout : ``float``, optional (default = `dropout`)
             Dropout performed after the multi-head attention softmax.
         relu_dropout : ``float``, optional (default = `dropout`)
             Dropout used after the ReLU in the FFN.
             Not usedin Vaswani 2017, but used in Tensor2Tensor.
-        learn_positional_embeddings : ``bool``, optional (default = False)
-            If off, sinusoidal embeddings are used.
-            If on, position embeddings are learned from scratch.
-        embeddings_scale : ``bool``, optional (default = False)
-            Scale embeddings relative to their dimensionality. Found useful in fairseq.
+        learn_position_embedding : ``bool``, optional (default = False)
+            If off, sinusoidal embedding are used.
+            If on, position embedding are learned from scratch.
+        embedding_scale : ``bool``, optional (default = False)
+            Scale embedding relative to their dimensionality. Found useful in fairseq.
         reduction : ``bool``, optional (default = False)
             If true, returns the mean vector for the entire encoding sequence.
         num_positions : ``int``, optional (default = 1024)
-            Max position of the position embeddings matrix.
+            Max position of the position embedding matrix.
         """
         super().__init__()
 
@@ -76,12 +67,10 @@ class TransformerEncoder(nn.Module):
         self.ffn_size = ffn_size
         self.num_layers = num_layers
         self.num_heads = num_heads
-        self.pad_index = pad_index
         self.dim = embedding_size
-        self.embeddings_scale = embeddings_scale
+        self.embedding_scale = embedding_scale
         self.reduction = reduction
-        # this is --dropout, not --relu-dropout or --attention-dropout
-        self.dropout = nn.Dropout(p=dropout)
+        self.norm = nn.LayerNorm(embedding_size)
         if relu_dropout is None:
             relu_dropout = dropout
         if attention_dropout is None:
@@ -91,62 +80,53 @@ class TransformerEncoder(nn.Module):
         assert embedding_size % num_heads == 0, \
             'Transformer embedding size must be a multiple of n_heads'
 
-        # create the positional embeddings
+        # create the positional embedding
         self.position_embedding = nn.Embedding(num_positions, embedding_size)
-        if not learn_positional_embeddings:
-            self.position_embedding.weight = nn.Parameter(create_positional_features(
-                num_positions,
-                embedding_size,
-                device=-1).squeeze(0))
-            self.position_embedding.weight.requires_grad = False
+        if not learn_position_embedding:
+            create_position_embedding(num_positions, embedding_size, self.position_embedding.weight)
         else:
             nn.init.normal_(self.position_embedding.weight, 0, math.sqrt(embedding_size))
 
         # build the model
         self.layers = nn.ModuleList()
         for _ in range(self.num_layers):
-            self.layers.append(TransformerEncoderLayer(
-                num_heads,
-                embedding_size,
-                ffn_size,
-                attention_dropout=attention_dropout,
-                relu_dropout=relu_dropout,
-                dropout=dropout))
+            self.layers.append(
+                TransformerEncoderLayer(
+                    num_heads,
+                    embedding_size,
+                    ffn_size,
+                    attention_dropout=attention_dropout,
+                    relu_dropout=relu_dropout,
+                    dropout=dropout)
+            )
 
-    def forward(self, inputs):
+    def forward(self, input, mask):
         """
         forward
 
         :param
-        inputs : ``torch.LongTensor``, required.
+        input : ``torch.LongTensor``, required.
             Input tokens tensor of shape (batch_size, seq_len).
 
         :return
-        outputs : ``torch.FloatTensor``
+        output : ``torch.FloatTensor``
             A ``torch.FloatTensor`` of shape (batch_size, seq_len, embedding_size).
-            If `reduction` is `True`, outputs is of shape (batch_size, embedding_size).
+            If `reduction` is `True`, output is of shape (batch_size, embedding_size).
 
         """
-        mask = (inputs != self.pad_index)
         positions = (mask.cumsum(dim=1, dtype=torch.long) - 1).clamp_(min=0)
-        tensor = self.embedding(inputs)
-        if self.embeddings_scale:
-            tensor = tensor * np.sqrt(self.dim)
-        tensor = tensor + self.position_embedding(positions)
-        # --dropout on the embeddings
-        tensor = self.dropout(tensor)
-
-        tensor *= mask.unsqueeze(-1).float()
-        for i in range(self.num_layers):
-            tensor = self.layers[i](tensor, mask)
-
+        tensor = self.embedding(input)
+        if self.embedding_scale:
+            tensor = tensor / np.sqrt(self.dim)
+        tensor = tensor + self.position_embedding(positions).expand_as(tensor)
+        for layer in self.layers:
+            tensor = layer(tensor, mask)
+        tensor = self.norm(tensor)
         if self.reduction:
-            divisor = mask.float().sum(dim=1).unsqueeze(-1).clamp(min=1e-20)
-            outputs = tensor.sum(dim=1) / divisor
-            return outputs
+            output = masked_mean(tensor, mask.unsqueeze(2), dim=1)
         else:
-            outputs = tensor
-            return outputs, mask
+            output = tensor
+        return output
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -167,17 +147,13 @@ class TransformerEncoderLayer(nn.Module):
             num_heads, embedding_size,
             dropout=attention_dropout,  # --attention-dropout
         )
-        self.norm1 = nn.LayerNorm(embedding_size)
+        self.norm = nn.LayerNorm(embedding_size)
         self.ffn = TransformerFFN(embedding_size, ffn_size, dropout=relu_dropout)
-        self.norm2 = nn.LayerNorm(embedding_size)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, tensor, mask):
+    def forward(self, input, mask):
         # shape (batch_size, seq_len, embedding_size)
-        tensor = tensor + self.dropout(self.attention(tensor, tensor, tensor, mask=mask))
-        tensor = _normalize(tensor, self.norm1)
-        tensor = tensor + self.dropout(self.ffn(tensor))
-        tensor = _normalize(tensor, self.norm2)
-        # processing padding
-        tensor *= mask.unsqueeze(-1).float()
-        return tensor
+        input_norm = self.norm(input)
+        context = self.attention(input_norm, input_norm, input_norm, mask=mask)
+        output = self.ffn(self.dropout(context) + input)
+        return output

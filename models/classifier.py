@@ -15,14 +15,14 @@ class ConvClassifier(BaseModel):
     """
     def __init__(self,
                  embedding_size,
-                 response_embedding,
+                 text_embedding,
                  kernel_size,
                  num_classes,
                  padding_idx,
                  ):
         super().__init__()
         self.embedding_size = embedding_size
-        self.response_embedding = response_embedding
+        self.text_embedding = text_embedding
         self.padding_idx = padding_idx
         self.num_classes = num_classes
 
@@ -38,7 +38,7 @@ class ConvClassifier(BaseModel):
         self.focal_loss = FocalLoss(reduce=True)
 
     def forward(self, input, mask=None):
-        embedded_input = self.response_embedding(input)
+        embedded_input = self.text_embedding(input)
         if mask is None:
             mask = input.ne(self.padding_idx)
         masked_vector = embedded_input.masked_fill((1 - mask.unsqueeze(2)).byte(), 0.0)
@@ -63,14 +63,13 @@ class ConvClassifier(BaseModel):
 
     @overrides
     def iterate(self, inputs, optimizer=None, grad_clip=None):
-        """
-        iterate
-        """
-        if isinstance(inputs.response, tuple):
-            response, _ = inputs.response
+        # inputs should contain `origin` and `speaker`
+
+        if isinstance(inputs.origin, tuple):
+            input, _ = inputs.origin
         else:
-            response = inputs.response
-        outputs = self.forward(response)
+            input = inputs.origin
+        outputs = self.forward(input)
         metrics = self.collect_metrics(outputs.probability, inputs.speaker)
 
         loss = metrics.loss
@@ -94,14 +93,14 @@ class DeltaConvClassifier(BaseModel):
     """
     def __init__(self,
                  embedding_size,
-                 response_embedding,
+                 text_embedding,
                  kernel_size,
                  num_classes,
                  padding_idx,
                  ):
         super().__init__()
         self.embedding_size = embedding_size
-        self.response_embedding = response_embedding
+        self.text_embedding = text_embedding
         self.padding_idx = padding_idx
         self.num_classes = num_classes
 
@@ -116,15 +115,15 @@ class DeltaConvClassifier(BaseModel):
             nn.Softmax(dim=-1))
         self.focal_loss = FocalLoss(reduce=True)
 
-    def forward(self, response, destylized, response_mask=None, destylized_mask=None):
-        embedded_response = self.response_embedding(response)
-        if response_mask is None:
-            response_mask = response.ne(self.padding_idx)
-        masked_response = embedded_response.masked_fill((1 - response_mask.unsqueeze(2)).byte(), 0.0)
-        internal = self.conv_layer(masked_response.transpose(1, 2))
+    def forward(self, origin, destylized, origin_mask=None, destylized_mask=None):
+        embedded_origin = self.text_embedding(origin)
+        if origin_mask is None:
+            origin_mask = origin.ne(self.padding_idx)
+        masked_origin = embedded_origin.masked_fill((1 - origin_mask.unsqueeze(2)).byte(), 0.0)
+        internal = self.conv_layer(masked_origin.transpose(1, 2))
         response_vector = F.max_pool1d(internal, internal.size(2)).squeeze(2)
 
-        embedded_destylized = self.response_embedding(destylized)
+        embedded_destylized = self.text_embedding(destylized)
         if destylized_mask is None:
             destylized_mask = destylized.ne(self.padding_idx)
         masked_destylized = embedded_destylized.masked_fill((1 - destylized_mask.unsqueeze(2)).byte(), 0.0)
@@ -150,23 +149,21 @@ class DeltaConvClassifier(BaseModel):
 
     @overrides
     def iterate(self, inputs, optimizer=None, grad_clip=None):
-        """
-        iterate
-        """
-        if isinstance(inputs.response, tuple):
-            response, _ = inputs.response
+        # inputs should contain `origin`, `destylized` and `speaker`
+
+        if isinstance(inputs.origin, tuple):
+            origin, _ = inputs.origin
         else:
-            response = inputs.response
+            origin = inputs.origin
         if isinstance(inputs.destylized, tuple):
             destylized, _ = inputs.destylized
         else:
             destylized = inputs.destylized
-        outputs = self.forward(response, destylized)
+        outputs = self.forward(origin, destylized)
         metrics = self.collect_metrics(outputs.probability, inputs.speaker)
 
         loss = metrics.loss
         if torch.isnan(loss):
-            print(outputs.probabilities, outputs.vectors, self.conv_layer[0].weight.data)
             raise ValueError("nan loss encountered")
 
         if self.training:

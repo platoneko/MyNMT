@@ -13,12 +13,12 @@ from torch.nn.utils import clip_grad_norm_
 from overrides import overrides
 
 
-class ProfileSeq2Seq(BaseModel):
+class SpeakerSeq2Seq(BaseModel):
     def __init__(
             self,
             post_embedding,
             response_embedding,
-            profile_embedding,
+            speaker_embedding,
             embedding_size,
             hidden_size,
             start_index,
@@ -27,14 +27,11 @@ class ProfileSeq2Seq(BaseModel):
             num_layers=2,
             dropout=0.2,
             teaching_force_rate=0.5,
-            mmi_anti=False,
-            anti_gamma=1,
-            anti_rate=0.5
     ):
         super().__init__()
         self.post_embedding = post_embedding
         self.response_embedding = response_embedding
-        self.profile_embedding = profile_embedding
+        self.speaker_embedding = speaker_embedding
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
         self.start_index = start_index
@@ -50,31 +47,32 @@ class ProfileSeq2Seq(BaseModel):
         decoder_attn = MLPAttention(hidden_size, hidden_size, hidden_size)
         decoder_input_size = embedding_size + hidden_size + embedding_size
         vocab_size = response_embedding.weight.size(0)
-        self.decoder = ProfileDecoder(
+        self.decoder = SpeakerDecoder(
             decoder_input_size,
             hidden_size,
             vocab_size,
             start_index,
             end_index,
             response_embedding,
-            profile_embedding,
+            speaker_embedding,
             num_layers=num_layers,
-            attention=decoder_attn,
+            context_attn=decoder_attn,
             dropout=dropout
         )
         self.cross_entropy = nn.CrossEntropyLoss(ignore_index=padding_index, reduction='mean')
-        self.mmi_anti = mmi_anti
-        self.anti_gamma = anti_gamma
-        self.anti_rate = anti_rate
 
     def forward(self, inputs, is_training=True):
         """
         train and eval
         """
+
         if is_training:
             assert inputs.response is not None
         if hasattr(inputs, 'response'):
-            response_tokens, response_len = inputs.response
+            if isinstance(inputs.response, tuple):
+                response_tokens, response_len = inputs.response
+            else:
+                response_tokens = inputs.response
 
         post_tokens, post_len = inputs.post
         embedded_post = self.post_embedding(post_tokens)
@@ -132,21 +130,10 @@ class ProfileSeq2Seq(BaseModel):
         logits = outputs.logits
         nll = self.cross_entropy(logits.reshape(-1, logits.size(-1)), target.reshape(-1))
         loss += nll
-        # num_tokens = target.ne(self.padding_index).sum().item()
-        # mean_nll = nll / num_tokens
         prediction = logits.argmax(dim=2)
         acc = accuracy(prediction, target, padding_idx=self.padding_index, end_idx=self.end_index)
         metrics.add(nll=nll, acc=acc)
         metrics.add(ppx=math.exp(nll.item()))
-        '''
-        if self.mmi_anti:
-            gamma_logits = logits[:, :self.anti_gamma, :]
-            gamma_target = target[:, :self.anti_gamma]
-            loss -= self.anti_rate * \
-                    self.cross_entropy(gamma_logits.reshape(-1, logits.size(-1)),
-                                       gamma_target.reshape(-1))
-        loss = loss / num_tokens
-        '''
         metrics.add(loss=loss)
         return metrics
 
@@ -156,7 +143,10 @@ class ProfileSeq2Seq(BaseModel):
         iterate
         """
         outputs = self.forward(inputs, is_training=True)
-        response_tokens, response_len = inputs.response
+        if isinstance(inputs.response, tuple):
+            response_tokens, response_len = inputs.response
+        else:
+            response_tokens = inputs.response
         target = response_tokens[:, 1:]
         metrics = self.collect_metrics(outputs, target)
 
@@ -175,7 +165,7 @@ class ProfileSeq2Seq(BaseModel):
         return metrics
 
 
-class ProfileDecoder(nn.Module):
+class SpeakerDecoder(nn.Module):
 
     def __init__(
             self,
@@ -185,9 +175,9 @@ class ProfileDecoder(nn.Module):
             start_index,
             end_index,
             text_embedding,
-            profile_embedding,
+            speaker_embedding,
             num_layers=2,
-            attention=None,
+            context_attn=None,
             dropout=0.0
     ):
         super().__init__()
@@ -198,8 +188,8 @@ class ProfileDecoder(nn.Module):
         self.start_index = start_index
         self.end_index = end_index
         self.text_embedding = text_embedding
-        self.profile_embedding = profile_embedding
-        self.attention = attention
+        self.speaker_embedding = speaker_embedding
+        self.context_attn = context_attn
         self.dropout = dropout
         self.num_layers = num_layers
 
@@ -217,7 +207,7 @@ class ProfileDecoder(nn.Module):
     def forward(
             self,
             hidden,
-            profile,
+            speaker,
             target=None,
             attn_value=None,
             attn_mask=None,
@@ -231,7 +221,7 @@ class ProfileDecoder(nn.Module):
         :param
         hidden : ``torch.FloatTensor``, required.
             Initial hidden tensor of shape (num_layers, batch_size, hidden_size)
-        profile : ``torch.LongTensor``, required.
+        speaker : ``torch.LongTensor``, required.
             Speaker tokens tensor of shape (batch_size,)
         target : ``torch.LongTensor``, optional (default = None)
             Target tokens tensor of shape (batch_size, length)
@@ -245,13 +235,13 @@ class ProfileDecoder(nn.Module):
         logits : ``torch.FloatTensor``
             A ``torch.FloatTensor`` of shape (batch_size, num_steps, vocab_size)
         """
-        if self.attention is not None:
+        if self.context_attn is not None:
             assert attn_value is not None
 
         if target is not None:
             num_steps = target.size(1) - 1
 
-        embedded_profile = self.profile_embedding(profile)
+        embedded_speaker = self.speaker_embedding(speaker)
         last_prediction = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
         step_logits = []
         for timestep in range(num_steps):
@@ -262,7 +252,7 @@ class ProfileDecoder(nn.Module):
             else:
                 input = last_prediction
             # `output` of shape (batch_size, vocab_size)
-            output, hidden = self._take_step(input, hidden, embedded_profile, attn_value, attn_mask)
+            output, hidden = self._take_step(input, hidden, embedded_speaker, attn_value, attn_mask)
             # shape: (batch_size,)
             last_prediction = torch.argmax(output, dim=-1)
             step_logits.append(output.unsqueeze(1))
@@ -270,19 +260,19 @@ class ProfileDecoder(nn.Module):
         logits = torch.cat(step_logits, dim=1)
         return logits
 
-    def _take_step(self, input, hidden, profile, attn_value=None, attn_mask=None):
+    def _take_step(self, input, hidden, speaker, attn_value=None, attn_mask=None):
         # `input` of shape: (batch_size,)
         # `hidden` of shape: (num_layers, batch_size, hidden_size)
         # shape: (batch_size, input_size)
         embedded_input = self.text_embedding(input)
         rnn_input = embedded_input
-        if self.attention is not None:
+        if self.context_attn is not None:
             # shape: (batch_size, num_rows)
-            attn_score = self.attention(hidden[-1], attn_value, attn_mask)
+            attn_score = self.context_attn(hidden[-1], attn_value, attn_mask)
             attn_input = attn_score.unsqueeze(1).matmul(attn_value).squeeze(1)
             # shape: (batch_size, input_size + attn_size)
             rnn_input = torch.cat([rnn_input, attn_input], dim=-1)
-        rnn_input = torch.cat([rnn_input, profile], dim=-1)
+        rnn_input = torch.cat([rnn_input, speaker], dim=-1)
         _, next_hidden = self.rnn(rnn_input.unsqueeze(1), hidden)
         # shape: (batch_size, vocab_size)
         output = self.output_layer(next_hidden[-1])
@@ -291,7 +281,7 @@ class ProfileDecoder(nn.Module):
     def forward_beam_search(
             self,
             hidden,
-            profile,
+            speaker,
             attn_value=None,
             attn_mask=None,
             num_steps=50,
@@ -324,16 +314,16 @@ class ProfileDecoder(nn.Module):
             Log probabilities of k top sequences.
         """
 
-        if self.attention is not None:
+        if self.context_attn is not None:
             assert attn_value is not None
 
         beam_search = BeamSearch(self.end_index, num_steps, beam_size, per_node_beam_size)
         start_prediction = hidden.new_full((hidden.size(1),), fill_value=self.start_index).long()
-        embedded_profile = self.profile_embedding(profile)
+        embedded_speaker = self.speaker_embedding(speaker)
         # `hidden` of shape: (batch_size, num_layers, hidden_size)
         hidden = hidden.transpose(0, 1).contiguous()
-        state = {'hidden': hidden, 'profile': embedded_profile}
-        if self.attention:
+        state = {'hidden': hidden, 'speaker': embedded_speaker}
+        if self.context_attn:
             state['attn_value'] = attn_value
             state['attn_mask'] = attn_mask
         all_top_k_predictions, log_probabilities = \
@@ -344,20 +334,20 @@ class ProfileDecoder(nn.Module):
         # shape: (group_size, input_size)
         embedded_input = self.text_embedding(input)
         rnn_input = embedded_input
-        profile = state['profile']
+        speaker = state['speaker']
         # shape: (group_size, num_layers, input_size)
         hidden = state['hidden']
         # shape: (num_layers, group_size, input_size)
         hidden = hidden.transpose(0, 1).contiguous()
-        if self.attention is not None:
+        if self.context_attn is not None:
             attn_value = state['attn_value']
             attn_mask = state['attn_mask']
             # shape: (group_size, num_rows)
-            attn_score = self.attention(hidden[-1], attn_value, attn_mask)
+            attn_score = self.context_attn(hidden[-1], attn_value, attn_mask)
             attn_input = torch.sum(attn_score.unsqueeze(2) * attn_value, dim=1)
             # shape: (group_size, input_size + attn_size)
             rnn_input = torch.cat([rnn_input, attn_input], dim=-1)
-        rnn_input = torch.cat([rnn_input, profile], dim=-1)
+        rnn_input = torch.cat([rnn_input, speaker], dim=-1)
         _, next_hidden = self.rnn(rnn_input.unsqueeze(1), hidden)
         state['hidden'] = next_hidden.transpose(0, 1).contiguous()
         # shape: (group_size, vocab_size)

@@ -14,14 +14,8 @@ class MultiHeadAttention(nn.Module):
         self.q_lin = nn.Linear(dim, dim)
         self.k_lin = nn.Linear(dim, dim)
         self.v_lin = nn.Linear(dim, dim)
-        # TODO: merge for the initialization step
-        nn.init.xavier_normal_(self.q_lin.weight)
-        nn.init.xavier_normal_(self.k_lin.weight)
-        nn.init.xavier_normal_(self.v_lin.weight)
-        # and set biases to 0
-        self.out_lin = nn.Linear(dim, dim)
 
-        nn.init.xavier_normal_(self.out_lin.weight)
+        self.out_lin = nn.Linear(dim, dim)
 
     def forward(self, query, key, value, mask=None):
         """
@@ -68,7 +62,7 @@ class MultiHeadAttention(nn.Module):
         k = prepare_head(self.k_lin(key))
         v = prepare_head(self.v_lin(value))
 
-        # shape: (batch_size * num_heads, query_length, key_length)
+        # shape: (batch_size * num_heads, query_len, key_len)
         dot_prod = q.bmm(k.transpose(1, 2))
 
         if mask is not None:

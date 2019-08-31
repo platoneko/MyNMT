@@ -1,16 +1,16 @@
-from modules.rnn import GRUEncoder
-from modules.rnn import StackGRUDecoder
-from modules.attention import MLPAttention
+from modules.transformer import TransformerEncoder
+from modules.transformer import TransformerDecoder
 from modules.utils import *
 from models.base_model import BaseModel
 from utils.pack import Pack
 from utils.metrics import accuracy, perplexity
 from torch.nn.utils import clip_grad_norm_
+from modules.criterions import SequenceCrossEntropy
 import torch.nn as nn
 from overrides import overrides
 
 
-class Seq2Seq(BaseModel):
+class Transformer(BaseModel):
     def __init__(
             self,
             post_embedding,
@@ -21,46 +21,54 @@ class Seq2Seq(BaseModel):
             start_index,
             end_index,
             padding_index,
-            bidirectional=True,
+            num_heads,
             num_layers=2,
             dropout=0.2,
+            learning_position_embedding=False,
+            embedding_scale=False,
+            num_positions=1024,
     ):
         super().__init__()
+
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
+        self.vocab_size = vocab_size
         self.start_index = start_index
         self.end_index = end_index
         self.padding_index = padding_index
         self.dropout = dropout
         self.num_layers = num_layers
-        if bidirectional:
-            encoder_hidden_size = hidden_size//2
-        else:
-            encoder_hidden_size = hidden_size
-        self.encoder = GRUEncoder(
+
+        self.encoder = TransformerEncoder(
+            num_heads,
+            num_layers,
             embedding_size,
-            encoder_hidden_size,
             post_embedding,
-            num_layers=num_layers,
-            bidirectional=bidirectional,
-            dropout=dropout
+            hidden_size,
+            dropout=dropout,
+            learn_position_embedding=learning_position_embedding,
+            embedding_scale=embedding_scale,
+            num_positions=num_positions
         )
+
         output_layer = nn.Sequential(
-            nn.Dropout(p=dropout),
+            nn.LayerNorm(embedding_size),
             nn.Linear(embedding_size, vocab_size)
         )
-        decoder_attn = MLPAttention(hidden_size, hidden_size, hidden_size)
-        decoder_input_size = embedding_size + hidden_size
-        self.decoder = StackGRUDecoder(
-            decoder_input_size,
+
+        self.decoder = TransformerDecoder(
+            num_heads,
+            num_layers,
+            embedding_size,
             hidden_size,
+            response_embedding,
             start_index,
             end_index,
-            response_embedding,
             output_layer,
-            num_layers=num_layers,
-            attention=decoder_attn,
-            dropout=dropout
+            dropout=dropout,
+            embedding_scale=embedding_scale,
+            learn_positional_embedding=learning_position_embedding,
+            num_positions=num_positions
         )
 
     def forward(self, inputs, num_steps=50, is_training=True):
@@ -73,39 +81,42 @@ class Seq2Seq(BaseModel):
                 response_tokens, response_len = inputs.response
             else:
                 response_tokens = inputs.response
-        post_tokens, post_len = inputs.post
-        encoder_output, encoder_hidden = self.encoder(inputs.post)
+        if isinstance(inputs.post, tuple):
+            post_tokens, post_len = inputs.post
+        else:
+            post_tokens = inputs.post
         encoder_mask = post_tokens.ne(self.padding_index)
+        encoder_output = self.encoder(post_tokens, encoder_mask)
         if is_training:
             logits = self.decoder(
-                encoder_hidden,
+                encoder_output,
+                encoder_mask,
                 target=response_tokens,
-                encoder_output=encoder_output,
-                encoder_mask=encoder_mask,
                 is_training=True
             )
         else:
             # test
             logits = self.decoder(
-                encoder_hidden,
-                encoder_output=encoder_output,
-                encoder_mask=encoder_mask,
-                is_training=False,
-                num_steps=num_steps
+                encoder_output,
+                encoder_mask,
+                num_steps=num_steps,
+                is_training=False
             )
         outputs = Pack(logits=logits)
         return outputs
 
     def beam_forward(self, inputs, beam_size=4, per_node_beam_size=4, num_steps=50):
         # designed for test or interactive mode
-        post_tokens, post_len = inputs.post
-        encoder_output, encoder_hidden = self.encoder(inputs.post)
+        if isinstance(inputs.post, tuple):
+            post_tokens, post_len = inputs.post
+        else:
+            post_tokens = inputs.post
         encoder_mask = post_tokens.ne(self.padding_index)
+        encoder_output = self.encoder(post_tokens, encoder_mask)
         all_top_k_predictions, log_probabilities = \
             self.decoder.beam_forward(
-                encoder_hidden,
-                encoder_output=encoder_output,
-                encoder_mask=encoder_mask,
+                encoder_output,
+                encoder_mask,
                 num_steps=num_steps,
                 beam_size=beam_size,
                 per_node_beam_size=per_node_beam_size
@@ -123,7 +134,7 @@ class Seq2Seq(BaseModel):
         metrics = Pack(num_samples=num_samples)
         loss = 0
         logits = outputs.logits
-        nll = sequence_cross_entropy_with_logits(logits, target, target.ne(self.padding_index))
+        nll = sequence_cross_entropy_with_logits(logits, target, weights=target.ne(self.padding_index))
         loss += nll
         prediction = logits.argmax(dim=2)
         acc = accuracy(prediction, target, padding_idx=self.padding_index, end_idx=self.end_index, reduction="batch")
@@ -142,6 +153,7 @@ class Seq2Seq(BaseModel):
             response_tokens, response_len = inputs.response
         else:
             response_tokens = inputs.response
+
         target = response_tokens[:, 1:].contiguous()
         metrics = self.collect_metrics(outputs, target)
 

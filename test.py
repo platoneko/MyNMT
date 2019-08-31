@@ -9,7 +9,7 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
-from models.profile_seq2seq import ProfileSeq2Seq
+from models.speaker_seq2seq import SpeakerSeq2Seq
 from utils.generator import Generator
 
 import pickle
@@ -34,8 +34,8 @@ def get_config():
     # Model
     model_arg = parser.add_argument_group("Model")
     model_arg.add_argument("--model", type=str, default='Seq2Seq')
-    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
-    model_arg.add_argument("--hidden_size", type=int, default=500)
+    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
+    model_arg.add_argument("--hidden_size", type=int, default=600)
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
 
@@ -53,9 +53,7 @@ def get_config():
     data_arg.add_argument("--save_dir", type=str, default="./results")
     data_arg.add_argument("--vocab_dir", type=str, default="./dataset/vocab")
 
-
     config = parser.parse_args()
-
     return config
 
 
@@ -120,9 +118,9 @@ def main():
     # Model definition
     post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
     response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-
-    assert config.model in ['Seq2Seq', 'Profile']
-    if config.model == 'Seq2Seq':
+    assert config.model in ['Standard']
+    # assert config.model in ['Standard', 'Speaker']
+    if config.model == 'Standard':
         model = Seq2Seq(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
@@ -135,12 +133,13 @@ def main():
             teaching_force_rate=0.0,
             num_layers=config.num_layers,
         )
-    elif config.model == 'Profile':
-        profile_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
-        model = ProfileSeq2Seq(
+
+    elif config.model == 'Speaker':
+        speaker_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
+        model = SpeakerSeq2Seq(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
-            profile_embedding=profile_embedding,
+            speaker_embedding=speaker_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
             start_index=response_field.vocab.stoi[BOS_TOKEN],
@@ -150,6 +149,7 @@ def main():
             teaching_force_rate=0.0,
             num_layers=config.num_layers,
         )
+
     model.load(filename=config.ckpt)
     model.to(device)
 

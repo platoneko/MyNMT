@@ -10,7 +10,8 @@ from torchtext.data import BucketIterator
 from torchtext.vocab import Vectors
 
 from models.seq2seq import Seq2Seq
-from models.profile_seq2seq import ProfileSeq2Seq
+from models.speaker_seq2seq import SpeakerSeq2Seq
+from models.transformer import Transformer
 from utils.trainer import Trainer
 
 import pickle
@@ -20,6 +21,18 @@ BOS_TOKEN = "<bos>"
 EOS_TOKEN = "<eos>"
 PAD_TOKEN = "<pad>"
 UNK_TOKEN = "<unk>"
+
+
+def str2bool(v):
+    """
+    str2bool
+    """
+    if v in ("True", "true"):
+        return True
+    elif v in ("False", "false"):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Unsupported value encountered.')
 
 
 def get_config():
@@ -38,15 +51,17 @@ def get_config():
 
     # Model
     model_arg = parser.add_argument_group("Model")
-    model_arg.add_argument("--model", type=str, default='Seq2Seq')
-    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=500)
-    model_arg.add_argument("--hidden_size", type=int, default=500)
+    model_arg.add_argument("--model", type=str, default='Standard')
+    model_arg.add_argument("--share_vocab", type=str2bool, default=False)
+    model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
+    model_arg.add_argument("--hidden_size", type=int, default=600)
     model_arg.add_argument("--num_layers", type=int, default=2)
     model_arg.add_argument("--dropout", type=float, default=0.2)
-    model_arg.add_argument("--teaching_force_rate", "--teach", type=float, default=0.5)
-    model_arg.add_argument("--mmi_anti", type=bool, default=False)
-    model_arg.add_argument("--anti_gamma", type=int, default=1)
-    model_arg.add_argument("--anti_rate", type=float, default=0.5)
+    model_arg.add_argument("--bidirectional", type=str2bool, default=True)
+    model_arg.add_argument("--num_heads", type=int, default=6)
+    model_arg.add_argument("--learning_position_embedding", type=str2bool, default=False)
+    model_arg.add_argument("--embedding_scale", type=str2bool, default=False)
+    model_arg.add_argument("--num_positions", type=int, default=1024)
 
     # Training
     train_arg = parser.add_argument_group("Training")
@@ -68,7 +83,6 @@ def get_config():
     misc_arg.add_argument("--pretrained", type=str, default=None)
 
     config = parser.parse_args()
-
     return config
 
 
@@ -101,12 +115,11 @@ def main():
         init_token=BOS_TOKEN,
         eos_token=EOS_TOKEN
     )
-    speaker_field = LabelField()
-
+    # speaker_field = LabelField()
     fields = {
         'post': ('post', post_field),
         'response': ('response', response_field),
-        'speaker': ('speaker', speaker_field)
+        # 'speaker': ('speaker', speaker_field)
     }
 
     train_data = TabularDataset(
@@ -122,32 +135,42 @@ def main():
     )
 
     if not os.path.exists(config.vocab_dir):
-        post_field.build_vocab(
-            train_data.post,
-            max_size=config.max_vocab_size,
-            min_freq=config.min_freq)
+        if not config.share_vocab:
+            post_field.build_vocab(
+                train_data.post,
+                max_size=config.max_vocab_size,
+                min_freq=config.min_freq
+            )
+            response_field.build_vocab(
+                train_data.response,
+                max_size=config.max_vocab_size,
+                min_freq=config.min_freq
+            )
+        else:
+            post_field.build_vocab(
+                train_data.post,
+                train_data.response,
+                max_size=config.max_vocab_size,
+                min_freq=config.min_freq
+            )
+            response_field.vocab = post_field.vocab
 
-        response_field.build_vocab(
-            train_data.response,
-            max_size=config.max_vocab_size,
-            min_freq=config.min_freq)
-
-        speaker_field.build_vocab(train_data.speaker)
-
+        # speaker_field.build_vocab(train_data.speaker)
         os.makedirs(config.vocab_dir)
-        with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'wb') as vocab_file:
-            pickle.dump(post_field.vocab, vocab_file)
-        with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'wb') as vocab_file:
-            pickle.dump(response_field.vocab, vocab_file)
-        with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'wb') as vocab_file:
-            pickle.dump(speaker_field.vocab, vocab_file)
+        with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'wb') as post_vocab:
+            pickle.dump(post_field.vocab, post_vocab)
+        with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'wb') as response_vocab:
+            pickle.dump(response_field.vocab, response_vocab)
+        # with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'wb') as speaker_vocab:
+            # pickle.dump(speaker_field.vocab, speaker_vocab)
+
     else:
-        with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'rb') as vocab_file:
-            post_field.vocab = pickle.load(vocab_file)
-        with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as vocab_file:
-            response_field.vocab = pickle.load(vocab_file)
-        with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as vocab_file:
-            speaker_field.vocab = pickle.load(vocab_file)
+        with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'rb') as post_vocab:
+            post_field.vocab = pickle.load(post_vocab)
+        with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as response_vocab:
+            response_field.vocab = pickle.load(response_vocab)
+        # with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as speaker_vocab:
+            # speaker_field.vocab = pickle.load(speaker_vocab)
 
     train_iter = BucketIterator(
         train_data,
@@ -164,43 +187,60 @@ def main():
     )
 
     # Model definition
-    post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
-    response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    assert config.model in ['Seq2Seq', 'Profile']
-    if config.model == 'Seq2Seq':
+    if not config.share_vocab:
+        post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
+        response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
+    else:
+        post_embedding = response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
+    assert config.model in ['Standard', 'Transformer']
+    # assert config.model in ['Standard', 'Speaker']
+    if config.model == 'Standard':
         model = Seq2Seq(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
+            vocab_size=len(response_field.vocab),
             start_index=response_field.vocab.stoi[BOS_TOKEN],
             end_index=response_field.vocab.stoi[EOS_TOKEN],
             padding_index=response_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
+            bidirectional=config.bidirectional,
             num_layers=config.num_layers,
-            mmi_anti=config.mmi_anti,
-            anti_gamma=config.anti_gamma,
-            anti_rate=config.anti_rate
+            dropout=config.dropout
         )
-    elif config.model == 'Profile':
-        profile_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
-        model = ProfileSeq2Seq(
+    elif config.model == 'Transformer':
+        model = Transformer(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
-            profile_embedding=profile_embedding,
+            embedding_size=config.embedding_size,
+            hidden_size=config.hidden_size,
+            vocab_size=len(response_field.vocab),
+            start_index=response_field.vocab.stoi[BOS_TOKEN],
+            end_index=response_field.vocab.stoi[EOS_TOKEN],
+            padding_index=response_field.vocab.stoi[PAD_TOKEN],
+            num_heads=config.num_heads,
+            num_layers=config.num_layers,
+            dropout=config.dropout,
+            learning_position_embedding=config.learning_position_embedding,
+            embedding_scale=config.embedding_scale,
+            num_positions=config.num_positions
+        )
+    '''
+    elif config.model == 'Speaker':
+        speaker_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
+        model = SpeakerSeq2Seq(
+            post_embedding=post_embedding,
+            response_embedding=response_embedding,
+            speaker_embedding=speaker_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
             start_index=response_field.vocab.stoi[BOS_TOKEN],
             end_index=response_field.vocab.stoi[EOS_TOKEN],
             padding_index=response_field.vocab.stoi[PAD_TOKEN],
             dropout=config.dropout,
-            teaching_force_rate=config.teaching_force_rate,
-            num_layers=config.num_layers,
-            mmi_anti=config.mmi_anti,
-            anti_gamma=config.anti_gamma,
-            anti_rate=config.anti_rate
+            num_layers=config.num_layers
         )
+    '''
     model.to(device)
 
     # Optimizer definition

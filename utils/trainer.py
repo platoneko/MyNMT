@@ -10,20 +10,22 @@ class Trainer(object):
     """
     Trainer
     """
-    def __init__(self,
-                 model,
-                 optimizer,
-                 train_iter,
-                 valid_iter,
-                 logger,
-                 valid_metric_name="-loss",
-                 num_epochs=1,
-                 save_dir=None,
-                 log_steps=None,
-                 valid_steps=None,
-                 grad_clip=None,
-                 lr_scheduler=None,
-                 save_summary=False):
+    def __init__(
+            self,
+            model,
+            optimizer,
+            train_iter,
+            valid_iter,
+            logger,
+            valid_metric_name="-loss",
+            num_epochs=1,
+            save_dir=None,
+            log_steps=None,
+            valid_steps=None,
+            grad_clip=None,
+            lr_scheduler=None,
+            save_summary=False
+    ):
         self.model = model
         self.optimizer = optimizer
         self.train_iter = train_iter

@@ -22,12 +22,14 @@ class Generator(object):
             logger,
             beam_size=4,
             per_node_beam_size=4,
+            num_steps=50,
             result_path=None
     ):
         self.model = model
         assert beam_size > 0
         self.beam_size = beam_size
         self.per_node_beam_size = per_node_beam_size
+        self.num_steps = num_steps
         self.data_iter = data_iter
         self.post_vocab = post_vocab
         self.response_vocab = response_vocab
@@ -57,18 +59,23 @@ class Generator(object):
         iterate
         """
         outputs = Pack()
-        # We need greedy search to obtain PPL
-        eval_outputs = self.model.forward(inputs, is_training=True)
+        # We need ground-truth PPL
+        eval_outputs = self.model(inputs, is_training=True)
         logits = eval_outputs.logits
         outputs.add(logits=logits)
 
         if self.beam_size == 1:
-            test_outputs = self.model.forward(inputs, is_training=False)
+            test_outputs = self.model(inputs, is_training=False, num_steps=self.num_steps)
             prediction = test_outputs.logits.argmax(dim=2)
             outputs.add(prediction=prediction)
         else:
             test_outputs = \
-                self.model.beam_search(inputs, self.beam_size, self.per_node_beam_size)
+                self.model.beam_forward(
+                    inputs,
+                    beam_size=self.beam_size,
+                    per_node_beam_size=self.per_node_beam_size,
+                    num_steps=self.num_steps
+                )
             outputs.add(prediction=test_outputs.prediction)
 
         response_token, response_len = inputs.response
