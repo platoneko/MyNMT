@@ -192,9 +192,8 @@ def main():
         response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
     else:
         post_embedding = response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    assert config.model in ['Standard', 'Transformer']
-    # assert config.model in ['Standard', 'Speaker']
-    if config.model == 'Standard':
+    assert config.model in ['rnn', 'transformer']
+    if config.model == 'rnn':
         model = Seq2Seq(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
@@ -208,7 +207,7 @@ def main():
             num_layers=config.num_layers,
             dropout=config.dropout
         )
-    elif config.model == 'Transformer':
+    elif config.model == 'transformer':
         model = Transformer(
             post_embedding=post_embedding,
             response_embedding=response_embedding,
@@ -244,8 +243,8 @@ def main():
     model.to(device)
 
     # Optimizer definition
-    assert config.optimizer in ['SGD', 'Adam']
-    if config.optimizer == 'SGD':
+    assert config.optimizer in ['sgd', 'adam']
+    if config.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=config.lr)
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
