@@ -13,8 +13,8 @@ from overrides import overrides
 class Seq2Seq(BaseModel):
     def __init__(
             self,
-            post_embedding,
-            response_embedding,
+            src_embedding,
+            tgt_embedding,
             embedding_size,
             hidden_size,
             vocab_size,
@@ -40,7 +40,7 @@ class Seq2Seq(BaseModel):
         self.encoder = GRUEncoder(
             embedding_size,
             encoder_hidden_size,
-            post_embedding,
+            src_embedding,
             num_layers=num_layers,
             bidirectional=bidirectional,
             dropout=dropout
@@ -56,7 +56,7 @@ class Seq2Seq(BaseModel):
             hidden_size,
             start_index,
             end_index,
-            response_embedding,
+            tgt_embedding,
             output_layer,
             num_layers=num_layers,
             attention=decoder_attn,
@@ -68,18 +68,18 @@ class Seq2Seq(BaseModel):
         train and eval
         """
         if is_training:
-            assert hasattr(inputs, 'response')
-            if isinstance(inputs.response, tuple):
-                response_tokens, response_len = inputs.response
+            assert hasattr(inputs, 'tgt')
+            if isinstance(inputs.tgt, tuple):
+                tgt_tokens, tgt_len = inputs.tgt
             else:
-                response_tokens = inputs.response
-        post_tokens, post_len = inputs.post
-        encoder_output, encoder_hidden = self.encoder(inputs.post)
-        encoder_mask = post_tokens.ne(self.padding_index)
+                tgt_tokens = inputs.tgt
+        src_tokens, src_len = inputs.src
+        encoder_output, encoder_hidden = self.encoder(inputs.src)
+        encoder_mask = src_tokens.ne(self.padding_index)
         if is_training:
             logits = self.decoder(
                 encoder_hidden,
-                target=response_tokens,
+                target=tgt_tokens,
                 encoder_output=encoder_output,
                 encoder_mask=encoder_mask,
                 is_training=True
@@ -98,9 +98,9 @@ class Seq2Seq(BaseModel):
 
     def beam_forward(self, inputs, beam_size=4, per_node_beam_size=4, num_steps=50):
         # designed for test or interactive mode
-        post_tokens, post_len = inputs.post
-        encoder_output, encoder_hidden = self.encoder(inputs.post)
-        encoder_mask = post_tokens.ne(self.padding_index)
+        src_tokens, src_len = inputs.src
+        encoder_output, encoder_hidden = self.encoder(inputs.src)
+        encoder_mask = src_tokens.ne(self.padding_index)
         all_top_k_predictions, log_probabilities = \
             self.decoder.beam_forward(
                 encoder_hidden,
@@ -138,11 +138,11 @@ class Seq2Seq(BaseModel):
         iterate
         """
         outputs = self.forward(inputs, is_training=True)
-        if isinstance(inputs.response, tuple):
-            response_tokens, response_len = inputs.response
+        if isinstance(inputs.tgt, tuple):
+            tgt_tokens, tgt_len = inputs.tgt
         else:
-            response_tokens = inputs.response
-        target = response_tokens[:, 1:].contiguous()
+            tgt_tokens = inputs.tgt
+        target = tgt_tokens[:, 1:].contiguous()
         metrics = self.collect_metrics(outputs, target)
 
         loss = metrics.loss

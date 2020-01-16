@@ -9,7 +9,6 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
-from models.speaker_seq2seq import SpeakerSeq2Seq
 from utils.generator import Generator
 
 import pickle
@@ -71,14 +70,14 @@ def main():
     # Data definition
     tokenizer = lambda x: x.split()
 
-    post_field = Field(
+    src_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
         batch_first=True,
         include_lengths=True
     )
-    response_field = Field(
+    tgt_field = Field(
         sequential=True,
         tokenize=tokenizer,
         lower=True,
@@ -90,9 +89,8 @@ def main():
     speaker_field = LabelField()
 
     fields = {
-        'post': ('post', post_field),
-        'response': ('response', response_field),
-        'speaker': ('speaker', speaker_field)
+        'src': ('src', src_field),
+        'tgt': ('tgt', tgt_field),
     }
 
     test_data = TabularDataset(
@@ -101,12 +99,10 @@ def main():
         fields=fields
     )
 
-    with open(os.path.join(config.vocab_dir, 'post.vocab.pkl'), 'rb') as post_vocab:
-        post_field.vocab = pickle.load(post_vocab)
-    with open(os.path.join(config.vocab_dir, 'response.vocab.pkl'), 'rb') as response_vocab:
-        response_field.vocab = pickle.load(response_vocab)
-    with open(os.path.join(config.vocab_dir, 'speaker.vocab.pkl'), 'rb') as speaker_vocab:
-        speaker_field.vocab = pickle.load(speaker_vocab)
+    with open(os.path.join(config.vocab_dir, 'src.vocab.pkl'), 'rb') as src_vocab:
+        src_field.vocab = pickle.load(src_vocab)
+    with open(os.path.join(config.vocab_dir, 'tgt.vocab.pkl'), 'rb') as tgt_vocab:
+        tgt_field.vocab = pickle.load(tgt_vocab)
 
     test_iter = BucketIterator(
         test_data,
@@ -116,38 +112,39 @@ def main():
     )
 
     # Model definition
-    post_embedding = nn.Embedding(len(post_field.vocab), config.embedding_size)
-    response_embedding = nn.Embedding(len(response_field.vocab), config.embedding_size)
-    assert config.model in ['Standard']
-    # assert config.model in ['Standard', 'Speaker']
-    if config.model == 'Standard':
+    src_embedding = nn.Embedding(len(src_field.vocab), config.embedding_size)
+    tgt_embedding = nn.Embedding(len(tgt_field.vocab), config.embedding_size)
+    assert config.model in ['rnn', 'transformer']
+    if config.model == 'rnn':
         model = Seq2Seq(
-            post_embedding=post_embedding,
-            response_embedding=response_embedding,
+            src_embedding=src_embedding,
+            tgt_embedding=tgt_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
-            start_index=response_field.vocab.stoi[BOS_TOKEN],
-            end_index=response_field.vocab.stoi[EOS_TOKEN],
-            padding_index=response_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=0.0,
+            vocab_size=len(tgt_field.vocab),
+            start_index=tgt_field.vocab.stoi[BOS_TOKEN],
+            end_index=tgt_field.vocab.stoi[EOS_TOKEN],
+            padding_index=tgt_field.vocab.stoi[PAD_TOKEN],
+            bidirectional=config.bidirectional,
             num_layers=config.num_layers,
+            dropout=config.dropout
         )
-
-    elif config.model == 'Speaker':
-        speaker_embedding = nn.Embedding(len(speaker_field.vocab), config.embedding_size)
-        model = SpeakerSeq2Seq(
-            post_embedding=post_embedding,
-            response_embedding=response_embedding,
-            speaker_embedding=speaker_embedding,
+    elif config.model == 'transformer':
+        model = Transformer(
+            src_embedding=src_embedding,
+            tgt_embedding=tgt_embedding,
             embedding_size=config.embedding_size,
             hidden_size=config.hidden_size,
-            start_index=response_field.vocab.stoi[BOS_TOKEN],
-            end_index=response_field.vocab.stoi[EOS_TOKEN],
-            padding_index=response_field.vocab.stoi[PAD_TOKEN],
-            dropout=config.dropout,
-            teaching_force_rate=0.0,
+            vocab_size=len(tgt_field.vocab),
+            start_index=tgt_field.vocab.stoi[BOS_TOKEN],
+            end_index=tgt_field.vocab.stoi[EOS_TOKEN],
+            padding_index=tgt_field.vocab.stoi[PAD_TOKEN],
+            num_heads=config.num_heads,
             num_layers=config.num_layers,
+            dropout=config.dropout,
+            learning_position_embedding=config.learning_position_embedding,
+            embedding_scale=config.embedding_scale,
+            num_positions=config.num_positions
         )
 
     model.load(filename=config.ckpt)
@@ -170,8 +167,8 @@ def main():
     generator = Generator(
         model=model,
         data_iter=test_iter,
-        post_vocab=post_field.vocab,
-        response_vocab=response_field.vocab,
+        src_vocab=src_field.vocab,
+        tgt_vocab=tgt_field.vocab,
         speaker_vocab=speaker_field.vocab,
         logger=logger,
         beam_size=config.beam_size,

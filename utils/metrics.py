@@ -79,7 +79,7 @@ def bleu(hyps, refs):
     bleu = []
     for hyp, ref in zip(hyps, refs):
         try:
-            score = bleu_score.sentence_bleu([ref], hyp)
+            score = bleu_score.sentence_bleu([ref.split()], hyp.split())
         except:
             score = 0
         bleu.append(score)

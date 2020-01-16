@@ -13,8 +13,8 @@ from overrides import overrides
 class Transformer(BaseModel):
     def __init__(
             self,
-            post_embedding,
-            response_embedding,
+            src_embedding,
+            tgt_embedding,
             embedding_size,
             hidden_size,
             vocab_size,
@@ -43,7 +43,7 @@ class Transformer(BaseModel):
             num_heads,
             num_layers,
             embedding_size,
-            post_embedding,
+            src_embedding,
             hidden_size,
             dropout=dropout,
             learn_position_embedding=learning_position_embedding,
@@ -61,7 +61,7 @@ class Transformer(BaseModel):
             num_layers,
             embedding_size,
             hidden_size,
-            response_embedding,
+            tgt_embedding,
             start_index,
             end_index,
             output_layer,
@@ -76,22 +76,22 @@ class Transformer(BaseModel):
         train and eval
         """
         if is_training:
-            assert hasattr(inputs, 'response')
-            if isinstance(inputs.response, tuple):
-                response_tokens, response_len = inputs.response
+            assert hasattr(inputs, 'tgt')
+            if isinstance(inputs.tgt, tuple):
+                tgt_tokens, tgt_len = inputs.tgt
             else:
-                response_tokens = inputs.response
-        if isinstance(inputs.post, tuple):
-            post_tokens, post_len = inputs.post
+                tgt_tokens = inputs.tgt
+        if isinstance(inputs.src, tuple):
+            src_tokens, src_len = inputs.src
         else:
-            post_tokens = inputs.post
-        encoder_mask = post_tokens.ne(self.padding_index)
-        encoder_output = self.encoder(post_tokens, encoder_mask)
+            src_tokens = inputs.src
+        encoder_mask = src_tokens.ne(self.padding_index)
+        encoder_output = self.encoder(src_tokens, encoder_mask)
         if is_training:
             logits = self.decoder(
                 encoder_output,
                 encoder_mask,
-                target=response_tokens,
+                target=tgt_tokens,
                 is_training=True
             )
         else:
@@ -107,12 +107,12 @@ class Transformer(BaseModel):
 
     def beam_forward(self, inputs, beam_size=4, per_node_beam_size=4, num_steps=50):
         # designed for test or interactive mode
-        if isinstance(inputs.post, tuple):
-            post_tokens, post_len = inputs.post
+        if isinstance(inputs.src, tuple):
+            src_tokens, src_len = inputs.src
         else:
-            post_tokens = inputs.post
-        encoder_mask = post_tokens.ne(self.padding_index)
-        encoder_output = self.encoder(post_tokens, encoder_mask)
+            src_tokens = inputs.src
+        encoder_mask = src_tokens.ne(self.padding_index)
+        encoder_output = self.encoder(src_tokens, encoder_mask)
         all_top_k_predictions, log_probabilities = \
             self.decoder.beam_forward(
                 encoder_output,
@@ -149,12 +149,12 @@ class Transformer(BaseModel):
         iterate
         """
         outputs = self.forward(inputs, is_training=True)
-        if isinstance(inputs.response, tuple):
-            response_tokens, response_len = inputs.response
+        if isinstance(inputs.tgt, tuple):
+            tgt_tokens, tgt_len = inputs.tgt
         else:
-            response_tokens = inputs.response
+            tgt_tokens = inputs.tgt
 
-        target = response_tokens[:, 1:].contiguous()
+        target = tgt_tokens[:, 1:].contiguous()
         metrics = self.collect_metrics(outputs, target)
 
         loss = metrics.loss
