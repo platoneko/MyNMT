@@ -9,6 +9,7 @@ from torchtext.data import TabularDataset
 from torchtext.data import BucketIterator
 
 from models.seq2seq import Seq2Seq
+from models.transformer import Transformer
 from utils.generator import Generator
 
 import pickle
@@ -32,7 +33,7 @@ def get_config():
 
     # Model
     model_arg = parser.add_argument_group("Model")
-    model_arg.add_argument("--model", type=str, default='Seq2Seq')
+    model_arg.add_argument("--model", type=str, default='rnn')
     model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
     model_arg.add_argument("--hidden_size", type=int, default=600)
     model_arg.add_argument("--num_layers", type=int, default=2)
@@ -86,7 +87,6 @@ def main():
         eos_token=EOS_TOKEN,
         include_lengths=True
     )
-    speaker_field = LabelField()
 
     fields = {
         'src': ('src', src_field),
@@ -169,7 +169,6 @@ def main():
         data_iter=test_iter,
         src_vocab=src_field.vocab,
         tgt_vocab=tgt_field.vocab,
-        speaker_vocab=speaker_field.vocab,
         logger=logger,
         beam_size=config.beam_size,
         per_node_beam_size=config.per_node_beam_size,

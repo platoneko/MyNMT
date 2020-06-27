@@ -16,9 +16,8 @@ class Generator(object):
             self,
             model,
             data_iter,
-            post_vocab,
-            response_vocab,
-            speaker_vocab,
+            src_vocab,
+            tgt_vocab,
             logger,
             beam_size=4,
             per_node_beam_size=4,
@@ -31,15 +30,14 @@ class Generator(object):
         self.per_node_beam_size = per_node_beam_size
         self.num_steps = num_steps
         self.data_iter = data_iter
-        self.post_vocab = post_vocab
-        self.response_vocab = response_vocab
-        self.speaker_vocab = speaker_vocab
+        self.src_vocab = src_vocab
+        self.tgt_vocab = tgt_vocab
         self.result_path = result_path
         self._new_file = True
         self.logger = logger
 
-        self.end_index = self.response_vocab.stoi[EOS_TOKEN]
-        self.padding_index = self.response_vocab.stoi[PAD_TOKEN]
+        self.end_index = self.tgt_vocab.stoi[EOS_TOKEN]
+        self.padding_index = self.tgt_vocab.stoi[PAD_TOKEN]
 
     def generate(self):
         """
@@ -78,8 +76,8 @@ class Generator(object):
                 )
             outputs.add(prediction=test_outputs.prediction)
 
-        response_token, response_len = inputs.response
-        target = response_token[:, 1:]
+        tgt_token, tgt_len = inputs.tgt
+        target = tgt_token[:, 1:]
         metrics = self.collect_metrics(inputs, outputs, target)
         return metrics
 
@@ -101,10 +99,9 @@ class Generator(object):
         acc = accuracy(prediction, target,
                        padding_idx=self.padding_index,
                        end_idx=self.end_index)
-        speaker = tensor2str(inputs.speaker, self.speaker_vocab, sequential=False)
-        predict_sentences = tensor2str(prediction, self.response_vocab, sequential=True, end_index=self.end_index)
-        post_sentences = tensor2str(inputs.post[0], self.post_vocab, sequential=True, end_index=self.padding_index)
-        target_sentences = tensor2str(target, self.response_vocab, sequential=True, end_index=self.end_index)
+        predict_sentences = tensor2str(prediction, self.tgt_vocab, sequential=True, end_index=self.end_index)
+        src_sentences = tensor2str(inputs.src[0], self.src_vocab, sequential=True, end_index=self.padding_index)
+        target_sentences = tensor2str(target, self.tgt_vocab, sequential=True, end_index=self.end_index)
         bleu_score = bleu(predict_sentences, target_sentences)
         dist1, dist2 = distinct(predict_sentences)
         metrics.add(acc=acc,
@@ -112,24 +109,22 @@ class Generator(object):
                     dist1=dist1,
                     dist2=dist2)
         if self.result_path is not None:
-            self.save_result(speaker, post_sentences, target_sentences, predict_sentences)
+            self.save_result(src_sentences, target_sentences, predict_sentences)
         return metrics
 
-    def save_result(self, speaker, post, target, predict):
+    def save_result(self, src, target, predict):
         if self._new_file:
             self._new_file = False
             with open(self.result_path, 'w') as result_file:
-                for spk, pos, tgt, pred in zip(speaker, post, target, predict):
+                for pos, tgt, pred in zip(src, target, predict):
                     result_file.write("----------------------------------------\n")
-                    result_file.write("- {}\n".format(spk))
                     result_file.write("> {}\n".format(pos))
                     result_file.write("< {}\n".format(tgt))
                     result_file.write("< {}\n".format(pred))
         else:
             with open(self.result_path, 'a') as result_file:
-                for spk, pos, tgt, pred in zip(speaker, post, target, predict):
+                for pos, tgt, pred in zip(src, target, predict):
                     result_file.write("----------------------------------------\n")
-                    result_file.write("- {}\n".format(spk))
                     result_file.write("> {}\n".format(pos))
                     result_file.write("< {}\n".format(tgt))
                     result_file.write("< {}\n".format(pred))
