@@ -50,7 +50,7 @@ def get_config():
 
     # Model
     model_arg = parser.add_argument_group("Model")
-    model_arg.add_argument("--model", type=str, default='Standard')
+    model_arg.add_argument("--model", type=str, default='rnn')
     model_arg.add_argument("--share_vocab", type=str2bool, default=False)
     model_arg.add_argument("--embedding_size", "--embed_size", type=int, default=300)
     model_arg.add_argument("--hidden_size", type=int, default=600)
@@ -64,7 +64,7 @@ def get_config():
 
     # Training
     train_arg = parser.add_argument_group("Training")
-    train_arg.add_argument("--optimizer", type=str, default="Adam")
+    train_arg.add_argument("--optimizer", type=str, default="adam")
     train_arg.add_argument("--lr", type=float, default=0.001)
     train_arg.add_argument("--grad_clip", type=float, default=5.0)
     train_arg.add_argument("--num_epochs", type=int, default=20)
